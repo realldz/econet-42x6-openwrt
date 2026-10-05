@@ -160,6 +160,18 @@ that it fell back to the default eeprom bin.
    consistent with "slot B selected". Confirm that on this unit by reading the
    byte, switching it to `'0'`, and observing which slot U-Boot takes. Add a
    `econet,vgp-42x6v1` case to a port of `en75_chboot`.
+
+   Two things are still genuinely unresolved, and neither should be assumed:
+
+   * **the location.** `0x6FC0000` is what U-Boot itself prints as its boot flag
+     address and is where the ASCII `'1'` actually sits, but a live
+     `/proc/mtd`-derived reading puts it at `0x68C0000`
+     (`reservearea + 0x200000`). Trust `0x6FC0000`, but verify;
+   * **the polarity.** Reading `'1'` at rest alongside a live kernel cmdline
+     reporting `bootflag=0` has not been reconciled. Determine which value means
+     slot A and which means slot B by experiment, not by inference.
+
+   Neither of these blocks the rest of item 4.
 2. Determine whether vendor U-Boot can be configured to accept the OpenWrt FIT,
    or whether it needs its `bootcmd` adjusted. It already fails with
    `Parse main image fail`, so the FIT is being discovered but not understood.
