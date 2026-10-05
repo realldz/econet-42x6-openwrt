@@ -1,0 +1,77 @@
+name: lint
+
+# Cheap checks that catch the classes of mistake this repository is actually
+# prone to: a Vietnamese comment creeping back in, CRLF line endings destroying
+# a patch file, or a malformed unified diff.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if bash -n "$f"; then
+              echo "ok   $f"
+            else
+              echo "FAIL $f"
+              fail=1
+            fi
+          done < <(git ls-files '*.sh')
+          exit $fail
+
+      - name: Python syntax
+        run: |
+          set -e
+          while IFS= read -r f; do
+            python3 -m py_compile "$f" && echo "ok   $f"
+          done < <(git ls-files '*.py')
+          find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+
+      - name: ShellCheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          # advisory only: these scripts are written for bash, not POSIX sh
+          shellcheck --shell=bash --severity=warning $(git ls-files '*.sh') || true
+
+      - name: Patches are well-formed unified diffs
+        run: |
+          set -e
+          while IFS= read -r p; do
+            git apply --stat "$p" >/dev/null && echo "ok   $p"
+          done < <(git ls-files '*.patch')
+
+      - name: No CRLF line endings
+        run: |
+          set -e
+          if git grep -lI $'\r$' -- . >/dev/null 2>&1; then
+            echo "!! files contain CRLF line endings:"
+            git grep -lI $'\r$' -- .
+            exit 1
+          fi
+          echo "ok: all files are LF"
+
+      - name: ASCII only in source and docs
+        run: |
+          set -e
+          # The point is to keep Vietnamese comments out of the repository, which
+          # is English-only. Binary assets are excluded by extension.
+          fail=0
+          while IFS= read -r f; do
+            if LC_ALL=C grep -qP '[^\x00-\x7F]' "$f"; then
+              echo "NON-ASCII: $f"
+              LC_ALL=C grep -nP '[^\x00-\x7F]' "$f" | head -5
+              fail=1
+            fi
+          done < <(git ls-files '*.sh' '*.py' '*.md' '*.dts' '*.dtsi' '*.patch' '*.mk' '*.env' '*.yml' '*.yaml' '*.txt' 'Makefile')
+          exit $fail

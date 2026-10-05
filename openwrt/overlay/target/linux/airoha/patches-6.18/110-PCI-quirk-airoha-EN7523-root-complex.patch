@@ -1,0 +1,46 @@
+--- a/drivers/pci/quirks.c
++++ b/drivers/pci/quirks.c
+@@ -6382,3 +6382,43 @@
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_GLI, 0x9750, pci_mask_replay_timer_timeout);
+ DECLARE_PCI_FIXUP_FINAL(PCI_VENDOR_ID_GLI, 0x9755, pci_mask_replay_timer_timeout);
+ #endif
++
++/*
++ * Airoha EN7523 / Econet 42X6 PCIe root complex
++ *
++ * The RC reports a bogus BAR 0: it reads 0x0000000c (64-bit prefetchable) and
++ * size-probes as 4 GiB.  pci_enable_resources() therefore fails with -EINVAL
++ * on both root ports, which leaves their PCI_COMMAND Memory Space Enable and
++ * Bus Master Enable bits clear.
++ *
++ * With bus mastering disabled on the root port, memory requests issued by an
++ * endpoint behind it (here a MediaTek MT7916) are never forwarded upstream to
++ * DRAM.  The endpoint WFDMA happily accepts the ring configuration, sets
++ * TX_DMA_EN/RX_DMA_EN and asserts TX_DMA_BUSY, but never fetches a single
++ * descriptor: cpu_idx advances while dma_idx stays 0.  Every MCU command then
++ * times out ("Message 00000010 (seq 1) timeout") and the device is unusable.
++ *
++ * Drop the bogus BARs so resource claiming succeeds, and enable memory
++ * decoding plus bus mastering explicitly.
++ */
++static void quirk_airoha_en7523_rc(struct pci_dev *dev)
++{
++	u16 cmd;
++	int i;
++
++	/* Only devices sitting directly on a root bus, i.e. the RC itself. */
++	if (dev->bus->self)
++		return;
++
++	for (i = 0; i < 2; i++) {
++		dev->resource[i].flags = 0;
++		dev->resource[i].start = 0;
++		dev->resource[i].end = 0;
++	}
++
++	pci_read_config_word(dev, PCI_COMMAND, &cmd);
++	cmd |= PCI_COMMAND_MEMORY | PCI_COMMAND_MASTER;
++	pci_write_config_word(dev, PCI_COMMAND, cmd);
++}
++DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MEDIATEK, 0x0810, quirk_airoha_en7523_rc);
++DECLARE_PCI_FIXUP_HEADER(PCI_VENDOR_ID_MEDIATEK, 0x0811, quirk_airoha_en7523_rc);

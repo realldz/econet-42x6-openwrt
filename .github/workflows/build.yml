@@ -1,0 +1,114 @@
+name: build
+
+# Builds the firmware and the project's Image Builder.
+#
+# This is a full OpenWrt source build: expect roughly 2-3 hours on a GitHub
+# runner. It is deliberately manual (or on a tag) rather than on every push,
+# because it is expensive and the useful output is a release artifact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload images and Image Builder as workflow artifacts'
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read the pinned OpenWrt revision
+        id: pin
+        run: |
+          set -e
+          . scripts/pin.env
+          echo "commit=$OPENWRT_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "Pinned revision: $OPENWRT_COMMIT ($OPENWRT_COMMIT_DATE)"
+
+      # An OpenWrt build needs roughly 30 GB. A stock GitHub runner has about
+      # 14 GB free, so this is not optional.
+      - name: Free disk space
+        run: |
+          set -e
+          df -h / | tail -1
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          df -h / | tail -1
+
+      - name: Clone OpenWrt at the pinned revision
+        run: |
+          set -e
+          git clone --filter=blob:none \
+            https://github.com/openwrt/openwrt.git openwrt
+          git -C openwrt checkout "${{ steps.pin.outputs.commit }}"
+
+      # Caching the download archive saves the bulk of the network time on
+      # repeat builds. staging_dir is deliberately not cached: it is enormous
+      # and changes on nearly every build.
+      - name: Cache OpenWrt downloads
+        uses: actions/cache@v4
+        with:
+          path: openwrt/dl
+          key: owrt-dl-${{ steps.pin.outputs.commit }}-${{ hashFiles('scripts/pin.env') }}
+          restore-keys: |
+            owrt-dl-${{ steps.pin.outputs.commit }}-
+
+      - name: Build firmware and Image Builder
+        run: ./scripts/build-imagebuilder.sh openwrt -j"$(nproc)"
+
+      - name: Verify every built image
+        run: |
+          set -e
+          shopt -s nullglob
+          for img in openwrt/bin/targets/airoha/en7523/*-initramfs-kernel.bin; do
+            python3 tools/verify_build.py "$img"
+          done
+
+      - name: Collect artifacts
+        run: |
+          set -e
+          mkdir -p out
+          cp -v openwrt/bin/targets/airoha/en7523/*.bin out/ 2>/dev/null || true
+          cp -v dist/*.tar.zst out/ 2>/dev/null || true
+          # OpenWrt writes a manifest alongside the images; keep it for traceability
+          cp -v openwrt/bin/targets/airoha/en7523/*.manifest out/ 2>/dev/null || true
+          cd out
+          sha256sum * > SHA256SUMS
+          ls -lh
+          cat SHA256SUMS
+
+      - name: Upload workflow artifacts
+        if: github.event_name == 'workflow_dispatch' && inputs.upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-airoha-en7523
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+          gh release create "${GITHUB_REF_NAME}" out/* \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

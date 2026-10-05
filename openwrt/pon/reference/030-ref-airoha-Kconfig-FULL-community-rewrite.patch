@@ -1,0 +1,112 @@
+--- a/drivers/net/ethernet/airoha/Kconfig
++++ b/drivers/net/ethernet/airoha/Kconfig
+@@ -1,34 +1,97 @@
+ # SPDX-License-Identifier: GPL-2.0-only
+ config NET_VENDOR_AIROHA
+-	bool "Airoha devices"
+-	depends on ARCH_AIROHA || COMPILE_TEST
++	bool "Airoha/EcoNet devices"
++	depends on ARCH_AIROHA || ECONET || COMPILE_TEST
+ 	help
+-	  If you have a Airoha SoC with ethernet, say Y.
++	  Enable Ethernet drivers for the Airoha ARM and EcoNet MIPS frame
++	  engines.
+ 
+ if NET_VENDOR_AIROHA
+ 
+ config NET_AIROHA_NPU
+ 	tristate "Airoha NPU support"
++	depends on ARCH_AIROHA || COMPILE_TEST
+ 	select WANT_DEV_COREDUMP
+ 	select REGMAP_MMIO
+ 	help
+-	  This driver supports Airoha Network Processor (NPU) available
+-	  on the Airoha Soc family.
++	  Support the Network Processor Unit available on newer Airoha SoCs.
++	  The Ethernet and PPE drivers also work without this module by using
++	  the CPU-direct PPE path. Enable this option when NPU firmware is
++	  available and PPE statistics or firmware-assisted commits are needed.
+ 
+ config NET_AIROHA
+-	tristate "Airoha SoC Gigabit Ethernet support"
+-	depends on NET_DSA || !NET_DSA
+-	select NET_AIROHA_NPU
++	tristate "Airoha/EcoNet frame-engine Ethernet support"
++	depends on OF
++	select PHYLINK
+ 	select PAGE_POOL
++	imply NET_AIROHA_NPU if ARCH_AIROHA
+ 	help
+-	  This driver supports the gigabit ethernet MACs in the
+-	  Airoha SoC family.
++	  Support the shared Airoha/EcoNet frame-engine Ethernet datapath,
++	  including generation-1 EN751221/EN7528 and generation-2
++	  EN7523/EN7581/AN7583 SoCs. The hardware generation is selected
++	  from the device-tree compatible and SoC data at runtime. QDMA, GDM,
++	  PPE and phylink infrastructure are built as one driver so both
++	  generations follow the same lifecycle and common interfaces.
++
++config NET_AIROHA_PPE_DEBUGFS
++	bool
++	default y
++	depends on NET_AIROHA && DEBUG_FS
++	help
++	  Build the PPE debugfs interface for the shared Airoha/EcoNet
++	  Ethernet driver.
+ 
+ config NET_AIROHA_FLOW_STATS
+ 	default y
+ 	bool "Airoha flow stats"
+ 	depends on NET_AIROHA && NET_AIROHA_NPU
+ 	help
+-	  Enable Aiorha flowtable statistic counters.
++	  Enable Airoha flowtable statistic counters.
+ 
+-endif #NET_VENDOR_AIROHA
++config NET_AIROHA_SOC_WED
++	bool "Airoha WED v1 support"
++	depends on NET_AIROHA && PCI
++	select NET_MEDIATEK_WED_COMMON
++	help
++	  Enable WiFi Ethernet Datapath (WED) hardware offload for the
++	  EN751221, EN7528 and EN7523 SoCs. When enabled, mt76 WiFi drivers can
++	  offload wireless transmit processing through the WED engine rather
++	  than taking the CPU path.
++
++	  If unsure, say N.
++
++config NET_AIROHA_WHNAT
++	bool "EcoNet EN751221 WHNAT (PPE offload for WiFi without WED)"
++	depends on NET_AIROHA && (ECONET || COMPILE_TEST)
++	help
++	  Let the EN751221 PPE forward NAT flows from and to WiFi netdevs
++	  whose radios have no WED support (MT7603, MT76x2), like the vendor
++	  WHNAT driver: mt76 hands received frames to the PPE through the LAN
++	  QDMA, and the PPE returns frames of flows bound towards a WiFi
++	  interface to the CPU, which queues them straight to that interface.
++	  The mt76 side registers its interfaces through
++	  en75_whnat_register_vif(). Nothing changes until the whnat_enable
++	  module parameter is set.
++
++	  If unsure, say N.
++
++config AIROHA_XPON_V1
++	tristate "Airoha/EcoNet xPON MAC driver"
++	depends on ARCH_AIROHA || ECONET || COMPILE_TEST
++	depends on NET_AIROHA
++	depends on OF
++	depends on SFP
++	depends on OPTICAL_FRONTEND || OPTICAL_FRONTEND=n
++	depends on MFD_SYSCON
++	select PHY_AIROHA_XPON
++	select XPON
++	select XPON_OMCI
++	select XPON_OAM
++	help
++	  Driver for the shared xPON MAC complex found in Airoha/EcoNet SoCs.
++	  GPON and EPON are implemented by one platform driver and selected by
++	  the airoha,pon-mode device-tree property. GPON includes ITU-T G.984.3
++	  activation/PLOAM and uses the in-kernel OMCI agent; EPON includes
++	  IEEE 802.3 MPCP LLID registration and security support.
++
++endif # NET_VENDOR_AIROHA

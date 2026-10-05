@@ -1,0 +1,10 @@
+--- a/net/Kconfig
++++ b/net/Kconfig
+@@ -81,6 +81,7 @@
+ 
+ menu "Networking options"
+ 
++source "net/xpon/Kconfig"
+ source "net/packet/Kconfig"
+ source "net/psp/Kconfig"
+ source "net/unix/Kconfig"

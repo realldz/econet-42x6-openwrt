@@ -1,0 +1,25 @@
+diff --git a/target/linux/airoha/en7523/config-6.18 b/target/linux/airoha/en7523/config-6.18
+--- a/target/linux/airoha/en7523/config-6.18
++++ b/target/linux/airoha/en7523/config-6.18
+@@ -317,3 +317,21 @@
+ CONFIG_ZSTD_COMMON=y
+ CONFIG_ZSTD_COMPRESS=y
+ CONFIG_ZSTD_DECOMPRESS=y
++
++# ---------------------------------------------------------------------------
++# Econet / vG vGP-42X6V1 (EN7523) -- board kernel options
++#
++# JFFS2             writable filesystem for the "data" overlay partition
++# MTD_CMDLINE_PARTS keep cmdline partition parsing available
++# SQUASHFS_XZ       xz-compressed read-only rootfs
++#
++# MTD_BLOCK / MTD_CHAR are NOT set by the stock en7523 config, which leaves the
++# initramfs without /dev/mtd*; that blocks flashing from Linux and the
++# sysupgrade path.  See docs/roadmap.md.
++# ---------------------------------------------------------------------------
++CONFIG_JFFS2_FS=y
++CONFIG_JFFS2_FS_DEBUG=0
++CONFIG_MTD_CMDLINE_PARTS=y
++CONFIG_SQUASHFS_XZ=y
++CONFIG_MTD_BLOCK=y
++CONFIG_MTD_CHAR=y

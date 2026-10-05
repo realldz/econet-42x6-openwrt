@@ -1,0 +1,126 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+/*
+ * Econet / vG vGP-42X6V1 -- GPON ONU on the Airoha EN7523 (EN7529CT) SoC
+ *
+ * Stage 1 board support for OpenWrt: UART console, SPI-NAND partition map and
+ * PCIe Wi-Fi. The xPON / optical nodes are deliberately NOT here; they need the
+ * kernel patches in openwrt/pon/ and live in en7523-vgp42x6v1-pon.dtsi.
+ *
+ * Every value in this file was read from real hardware:
+ *   - /proc/mtd, /proc/meminfo, /proc/cmdline
+ *   - the stock device tree extracted from the vendor FIT image
+ */
+/dts-v1/;
+
+/* The bootloader (tcboot / U-Boot) places ATF at the start of DRAM. */
+/memreserve/ 0x80000000 0x200000;
+
+#include "en7523.dtsi"
+
+/ {
+	model = "Econet vG vGP-42X6V1";
+	compatible = "econet,vgp-42x6v1", "airoha,en7523";
+
+	aliases {
+		serial0 = &uart1;
+	};
+
+	chosen {
+		bootargs = "console=ttyS0,115200n8 earlycon";
+		stdout-path = "serial0:115200n8";
+		linux,usable-memory-range = <0x80200000 0x1fe00000>;
+	};
+
+	/*
+	 * Real DRAM is 512 MiB. Measured live: MemTotal 480136 kB (the first
+	 * ~32 MiB are held by the NPU/ATF). The stock device tree claims
+	 * 0x40000000 (1 GiB), which is wrong -- do not copy it.
+	 */
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x80000000 0x20000000>;
+	};
+};
+
+&gpio0 {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+};
+
+/* MediaTek MT7916 Wi-Fi sits on PCIe (needs kmod-mt7915e + the firmware kmods). */
+&pcie0 {
+	status = "okay";
+};
+
+&pcie1 {
+	status = "okay";
+};
+
+/*
+ * SPI-NAND partition table -- exactly as reported by `cat /proc/mtd` on real
+ * hardware.
+ *
+ * DO NOT WRITE to tclinux (slot A), config, reservearea, or the trailing raw
+ * region (0x6900000-0x8000000) which holds the factory block (GPON identity +
+ * laser BOB calibration) and the bad-block table. See docs/hardware.md.
+ */
+&nand {
+	partitions {
+		compatible = "fixed-partitions";
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		partition@0 {
+			label = "bootloader";
+			reg = <0x0000000 0x0080000>;
+			read-only;
+		};
+
+		partition@80000 {
+			label = "romfile";
+			reg = <0x0080000 0x0040000>;
+			read-only;
+		};
+
+		partition@c0000 {
+			label = "tclinux";		/* slot A -- stock firmware, never written */
+			reg = <0x00C0000 0x2800000>;
+			read-only;
+		};
+
+		partition@28c0000 {
+			label = "tclinux_slave";	/* slot B -- where OpenWrt is written */
+			reg = <0x28C0000 0x2800000>;
+		};
+
+		partition@50c0000 {
+			label = "data";			/* writable -- intended as the overlay */
+			reg = <0x50C0000 0x1400000>;
+		};
+
+		partition@64c0000 {
+			label = "config";
+			reg = <0x64C0000 0x0200000>;
+			read-only;
+		};
+
+		partition@66c0000 {
+			label = "reservearea";		/* empty (all 0xFF) but still keep it read-only */
+			reg = <0x66C0000 0x0240000>;
+			read-only;
+		};
+
+		/*
+		 * 0x6900000-0x8000000 (23 MiB) is the vendor's raw area and belongs
+		 * to no mtd partition:
+		 *   0x6F00000  factory block: GPON identity + laser BOB calibration
+		 *   0x6FC0000  a single byte, value '1' (purpose unknown)
+		 *   0x75E0000  'RAWB' marker
+		 *   0x7FE0000  'BMT' (bad-block table)
+		 * It is intentionally left undeclared and unwritten.
+		 */
+	};
+};

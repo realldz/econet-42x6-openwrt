@@ -1,0 +1,32 @@
+# Build outputs. Never commit these: they are large, they are reproducible, and
+# they belong in a GitHub release, not in git history.
+
+dist/
+out/
+build/
+
+# Firmware and package artifacts
+*.tar.zst
+*.tar.gz
+*.bin
+*.itb
+*.img
+*.ko
+*.apk
+*.ipk
+*.manifest
+
+# Scratch
+tmp/
+*.log
+*.orig
+*.rej
+__pycache__/
+*.pyc
+
+# Editors and OS cruft
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

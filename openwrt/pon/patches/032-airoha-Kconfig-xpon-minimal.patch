@@ -1,0 +1,28 @@
+--- a/drivers/net/ethernet/airoha/Kconfig
++++ b/drivers/net/ethernet/airoha/Kconfig
+@@ -28,8 +28,25 @@
+ config NET_AIROHA_FLOW_STATS
+ 	default y
+ 	bool "Airoha flow stats"
+ 	depends on NET_AIROHA && NET_AIROHA_NPU
+ 	help
+ 	  Enable Aiorha flowtable statistic counters.
+ 
++config AIROHA_XPON_V1
++	tristate "Airoha/EcoNet xPON MAC driver"
++	depends on ARCH_AIROHA || ECONET || COMPILE_TEST
++	depends on NET_AIROHA
++	depends on OF
++	depends on SFP
++	depends on OPTICAL_FRONTEND || OPTICAL_FRONTEND=n
++	depends on MFD_SYSCON
++	select PHY_AIROHA_XPON
++	select XPON
++	select XPON_OMCI
++	select XPON_OAM
++	help
++	  Driver for the shared xPON MAC complex of Airoha/EcoNet SoCs.
++	  GPON and EPON are one platform driver; the mode is selected by the
++	  airoha,pon-mode device-tree property.
++
+ endif #NET_VENDOR_AIROHA

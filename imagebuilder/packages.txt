@@ -1,0 +1,27 @@
+# Optional packages for a vGP-42X6V1 image.
+#
+# Use with:  ./imagebuilder/build-image.sh <ib.tar.zst> --all-packages
+# or copy a line into -P "..."
+#
+# Keep this list conservative.  The board currently has no Ethernet driver, so
+# anything that assumes a working LAN port is not yet useful.
+#
+# Comment out what you do not want.
+
+# --- management UI ---------------------------------------------------------
+luci
+luci-ssl
+
+# --- diagnostics -----------------------------------------------------------
+# kmod-ringwatch polls the MT7916 WFDMA ring registers; kmod-pciedbg exposes
+# raw PCIe register access through /proc/pciedbg.  Both are debug aids and are
+# deliberately NOT part of DEVICE_PACKAGES.
+kmod-pciedbg
+kmod-ringwatch
+
+# --- useful extras ---------------------------------------------------------
+# Uncomment once Ethernet works, or if you are happy with Wi-Fi only.
+# luci-app-commands
+# luci-app-opkg
+# htop
+# tcpdump

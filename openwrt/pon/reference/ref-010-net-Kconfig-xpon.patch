@@ -1,0 +1,51 @@
+--- a/net/Kconfig
++++ b/net/Kconfig
+@@ -26,6 +26,12 @@
+ 
+ if NET
+ 
++config ETHERNET_PACKET_MANGLE
++	bool
++	help
++	  This option can be selected by phy drivers that need to mangle
++	  packets going in or out of an ethernet device.
++
+ config WANT_COMPAT_NETLINK_MESSAGES
+ 	bool
+ 	help
+@@ -69,7 +75,7 @@
+ config NET_DEVMEM
+ 	def_bool y
+ 	select GENERIC_ALLOCATOR
+-	depends on DMA_SHARED_BUFFER
++	depends on DMA_SHARED_BUFFER=y
+ 	depends on PAGE_POOL
+ 
+ config NET_SHAPER
+@@ -81,6 +87,7 @@
+ 
+ menu "Networking options"
+ 
++source "net/xpon/Kconfig"
+ source "net/packet/Kconfig"
+ source "net/psp/Kconfig"
+ source "net/unix/Kconfig"
+@@ -140,6 +147,9 @@
+ source "net/mptcp/Kconfig"
+ 
+ endif # if INET
++
++config SOCK_DIAG
++	bool
+ 
+ config NETWORK_SECMARK
+ 	bool "Security Marking"
+@@ -492,7 +502,7 @@
+ 	default n
+ 
+ config PAGE_POOL
+-	bool
++	bool "Page pool support"
+ 
+ config PAGE_POOL_STATS
+ 	default n

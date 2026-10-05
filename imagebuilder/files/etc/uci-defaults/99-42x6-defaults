@@ -1,0 +1,14 @@
+#!/bin/sh
+# First-boot defaults for the vGP-42X6V1 image.
+#
+# Deliberately minimal.  There is no Ethernet driver for this SoC variant yet,
+# and the Wi-Fi PHY numbering is not stable across boots, so generating a
+# network/wireless config here would be guesswork.  Configure wireless by hand
+# for now (`wifi config`, then edit /etc/config/wireless).
+
+uci -q batch <<-EOF
+	set system.@system[0].hostname='42x6'
+	commit system
+EOF
+
+exit 0

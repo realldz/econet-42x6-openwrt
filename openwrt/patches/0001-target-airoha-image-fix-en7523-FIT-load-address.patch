@@ -1,0 +1,12 @@
+diff --git a/target/linux/airoha/image/Makefile b/target/linux/airoha/image/Makefile
+--- a/target/linux/airoha/image/Makefile
++++ b/target/linux/airoha/image/Makefile
+@@ -3,7 +3,7 @@
+ 
+ loadaddr-$(CONFIG_TARGET_airoha_an7581) := 0x80200000
+ loadaddr-$(CONFIG_TARGET_airoha_an7583) := 0x80200000
+-loadaddr-$(CONFIG_TARGET_airoha_en7523) := 0x80200000
++loadaddr-$(CONFIG_TARGET_airoha_en7523) := 0x80208000
+ 
+ # default all platform image(fit) build
+ define Device/Default

@@ -1,0 +1,35 @@
+Airoha EN7523/AN7581/AN7583: ATF+TCBoot chiem 2 MiB dau DRAM (0x80000000-0x80200000).
+
+FIT duoc nap o 0x80208000 (loadaddr-$(CONFIG_TARGET_airoha_en7523) trong
+target/linux/airoha/image/Makefile).
+
+TEXT_OFFSET mac dinh cua ARM32 la 0x00008000 lam kernel link o 0xC0008000, nen
+head.S tinh  PHYS_OFFSET = runtime(_text) - TEXT_OFFSET = 0x80208000 - 0x8000
+= 0x80200000.  Gia tri do KHONG chia het cho 2 MiB nen arch/arm/kernel/phys2virt.S
+deadloop NGAY trong head.S, truoc ca parse_early_param() -> UART im lang tuyet doi.
+
+    subs  r3, r8, #PAGE_OFFSET      @ r8 = runtime(_text) - TEXT_OFFSET
+    mov   r0, r3, lsr #21
+    teq   r3, r0, lsl #21           @ must be 2 MiB aligned
+    bne   0f
+0:  mov   r0, r0                    @ deadloop on error
+    b     0b
+
+head.S con co  #error KERNEL_RAM_VADDR must start at 0xXXXX8000
+=> TEXT_OFFSET bat buoc phai ket thuc bang 0x8000.
+
+Dat TEXT_OFFSET = 0x00208000:
+  _text vat ly = PHYS_OFFSET + TEXT_OFFSET = 0x80000000 + 0x208000 = 0x80208000
+  = dung bang loadaddr cua FIT; PHYS_OFFSET = 0x80000000 (chia het 2 MiB) -> OK.
+
+CANH BAO: 0x00200000 la gia tri SAI, da tung lam kernel im lang hoan toan.
+--- a/arch/arm/Makefile
++++ b/arch/arm/Makefile
+@@ -169,6 +169,7 @@
+ textofs-$(CONFIG_ARCH_QCOM_RESERVE_SMEM) := 0x00208000
+ textofs-$(CONFIG_ARCH_MESON) := 0x00208000
+ textofs-$(CONFIG_ARCH_AXXIA) := 0x00308000
++textofs-$(CONFIG_ARCH_AIROHA) := 0x00208000
+ 
+ # Machine directory name.  This list is sorted alphanumerically
+ # by CONFIG_* macro name.

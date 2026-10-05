@@ -1,0 +1,13 @@
+# Line endings are LF everywhere: this repo feeds Linux/OpenWrt build trees and
+# carries patch files that must stay byte-exact.
+* text=auto eol=lf
+
+# Never let git rewrite these -- a normalised patch or script silently breaks.
+*.patch  -text
+*.diff   -text
+*.bin    binary
+*.ko     binary
+*.itb    binary
+*.zst    binary
+*.tar    binary
+*.img    binary

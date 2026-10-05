@@ -1,0 +1,20 @@
+diff --git a/package/kernel/mt76/Makefile b/package/kernel/mt76/Makefile
+--- a/package/kernel/mt76/Makefile
++++ b/package/kernel/mt76/Makefile
+@@ -612,6 +612,8 @@
+ 		$(PKG_BUILD_DIR)/firmware/mt7915_wa.bin \
+ 		$(PKG_BUILD_DIR)/firmware/mt7915_wm.bin \
+ 		$(PKG_BUILD_DIR)/firmware/mt7915_rom_patch.bin \
++		$(PKG_BUILD_DIR)/firmware/mt7915_eeprom.bin \
++		$(PKG_BUILD_DIR)/firmware/mt7915_eeprom_dbdc.bin \
+ 		$(1)/lib/firmware/mediatek
+ endef
+ 
+@@ -621,6 +623,7 @@
+ 		$(PKG_BUILD_DIR)/firmware/mt7916_wa.bin \
+ 		$(PKG_BUILD_DIR)/firmware/mt7916_wm.bin \
+ 		$(PKG_BUILD_DIR)/firmware/mt7916_rom_patch.bin \
++		$(PKG_BUILD_DIR)/firmware/mt7916_eeprom.bin \
+ 		$(1)/lib/firmware/mediatek
+ endef
+ 

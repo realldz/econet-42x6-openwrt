@@ -1,0 +1,11 @@
+--- a/drivers/net/Kconfig
++++ b/drivers/net/Kconfig
+@@ -25,6 +25,8 @@
+ # All the following symbols are dependent on NETDEVICES - do not repeat
+ # that for each of the symbols.
+ if NETDEVICES
++
++source "drivers/net/optical/Kconfig"
+ 
+ config MII
+ 	tristate
