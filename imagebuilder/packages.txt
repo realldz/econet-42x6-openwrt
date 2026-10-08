@@ -3,25 +3,43 @@
 # Use with:  ./imagebuilder/build-image.sh <ib.tar.zst> --all-packages
 # or copy a line into -P "..."
 #
-# Keep this list conservative.  The board currently has no Ethernet driver, so
-# anything that assumes a working LAN port is not yet useful.
+# Keep this list purposeful: target airoha/en7523 is source-only, so nothing
+# here can be installed later from a package feed -- whatever is missing has to
+# be added and the image rebuilt.
 #
 # Comment out what you do not want.
 
-# --- management UI ---------------------------------------------------------
+# --- Wi-Fi and its AP daemon ------------------------------------------------
+# The device definition already pulls in the driver and the firmware blobs
+# (kmod-mt7915e, kmod-mt7915-firmware, kmod-mt7916-firmware).  Without a wpad
+# variant there is no hostapd at all and no wlan* interface ever appears.
+wpad-mbedtls
+hostapd-utils
+iw
+iwinfo
+wireless-regdb
+
+# --- management UI ----------------------------------------------------------
 luci
 luci-ssl
+luci-app-firewall
+luci-app-package-manager
+
+# --- package manager --------------------------------------------------------
+# OpenWrt main uses apk.  Do not run `apk upgrade` on this board: parts of the
+# snapshot are built against a different zlib ABI than the image.
+apk-mbedtls
 
 # --- diagnostics -----------------------------------------------------------
 # kmod-ringwatch polls the MT7916 WFDMA ring registers; kmod-pciedbg exposes
 # raw PCIe register access through /proc/pciedbg.  Both are debug aids and are
-# deliberately NOT part of DEVICE_PACKAGES.
-kmod-pciedbg
-kmod-ringwatch
+# deliberately NOT part of DEVICE_PACKAGES -- add them only when debugging,
+# with --debug-kmods.
+# kmod-pciedbg
+# kmod-ringwatch
 
 # --- useful extras ---------------------------------------------------------
-# Uncomment once Ethernet works, or if you are happy with Wi-Fi only.
-# luci-app-commands
-# luci-app-opkg
+iperf3
 # htop
 # tcpdump
+# luci-app-commands

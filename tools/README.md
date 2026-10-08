@@ -22,6 +22,7 @@ root, for example `python tools/ub_uart.py peek --sec 5`.
 | `tools/ub_paste.py` | Paste one small file into the running target's tmpfs over the console with `printf` octal escapes, for targets that have no /dev/mtd*, /dev/mem, /proc/kcore, base64, uudecode or xxd. |
 | `tools/ub_cc.py` | Escape a stuck U-Boot secondary prompt (`PS2 '> '`) with repeated Ctrl-C, or reboot a live Linux through SysRq. |
 | `tools/verify_build.py` | Verify that a built image's FIT load/entry address matches the kernel `_text` link address (it must be `0x80208000`). |
+| `tools/mt7916_eeprom_mac.py` | Write your unit's MAC into the MT7916 default eeprom blob, so the driver stops using a random address every boot. Inspect-only with `--show`. |
 
 ## Serial port and baud rate
 
@@ -73,9 +74,11 @@ deliberately left at `3` and is not auto-detected.
 
 ## ub_paste.py: the constraints it works around
 
-The running initramfs has no /dev/mtd* (no CONFIG_MTD_CHAR/MTD_BLOCK), no /dev/mem (no
+The running initramfs of an early build had no /dev/mtd*, no /dev/mem (no
 CONFIG_DEVMEM), no /proc/kcore, and its busybox has no base64/uudecode/xxd, so the
-console is the only transport. The limits below were found empirically:
+console is the only transport. (The missing /dev/mtd* was later explained: it is
+devtmpfs, not MTD_BLOCK -- see [`docs/sysupgrade.md`](../docs/sysupgrade.md).) The limits
+below were found empirically:
 
 * **Line length.** The target busybox is built with
   `CONFIG_FEATURE_EDITING_MAX_LEN=512` (not 1024). A longer input line is cut off, which
@@ -107,7 +110,11 @@ with the md5 of the local file, so a silent byte loss is caught rather than assu
   a brick.
 * `ub_push.py` writes only into the empty part of slot B (`tclinux_slave`, `mtd3` under
   the OpenWrt partition scheme - see the mtd numbering caveat above), and the read-back
-  `dd if=/dev/mtd3 ...` only works once a kernel with MTD char/block support is running.
+  `dd if=/dev/mtd3 ...` only works once a kernel that exposes /dev/mtd* is running, which
+  on this board needs devtmpfs in the kernel config - see
+  [`docs/sysupgrade.md`](../docs/sysupgrade.md). Note also that `dd` must never be used to
+  *write* firmware to this NAND: an unerased page keeps the bitwise AND of the old and new
+  content plus broken ECC, while `dd` still reports success.
 * **A PCIe MMIO hang can only be cleared by a power cycle.** Reading a device BAR while
   `PCI_COMMAND.MEMORY` is 0 hangs the whole SoC: no oops, no watchdog message, no
   soft-lockup warning, and the console dies with it. No tool here recovers the board from

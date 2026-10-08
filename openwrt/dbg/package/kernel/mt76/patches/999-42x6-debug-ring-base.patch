@@ -1,0 +1,16 @@
+--- a/dma.c
++++ b/dma.c
+@@ -214,6 +214,13 @@
+ 
+ 	Q_WRITE(q, desc_base, q->desc_dma);
+ 
++	/* 42X6 debug: does the chip really latch the ring base we write? */
++	dev_info(dev->dev,
++		 "42X6 ring hw_idx=%u ndesc=%d desc_dma=%pad rb: base=%08x cnt=%08x cidx=%08x didx=%08x\n",
++		 q->hw_idx, q->ndesc, &q->desc_dma,
++		 Q_READ(q, desc_base), Q_READ(q, ring_size),
++		 Q_READ(q, cpu_idx), Q_READ(q, dma_idx));
++
+ 	q->head = mt76_dma_read_dma_idx(q, 0);
+ 	q->tail = q->head;
+ }

@@ -18,13 +18,22 @@ in.
 |---|---|
 | [pcie-root-cause.md](pcie-root-cause.md) | The central bug of this project: why the MT7916 could not DMA, how it was proven, and the fix. Includes the hazard that costs you a power cycle, and one retracted dead end. |
 | [wifi.md](wifi.md) | MT7916 bring-up: mandatory module load order, why `modprobe` is unusable, and the eeprom packaging gap that made probe fail with `-110`. |
+| [ethernet.md](ethernet.md) | Where the four GbE ports come from: the adopted EN7523 patch series, the internal MT7530 switch driven over MMIO, the port map, and the kconfig traps that go with it. |
+| [leds.md](leds.md) | Front-panel LEDs and buttons: how the WLAN LEDs are wired, why they used to stay on with the radio off, and the three mt76 patches that make them follow the radio. |
+
+## Not working yet
+
+| Document | Contents |
+|---|---|
+| [pon-port.md](pon-port.md) | The xPON/optical port: what compiles, what the `airoha_eth.h` API mismatch blocks, and what the optional stage 2 material contains. |
 
 ## Procedures
 
 | Document | Contents |
 |---|---|
 | [booting.md](booting.md) | Boot chain, the `TEXT_OFFSET`/load-address contract, the RAM-boot procedure, how to get a file onto the device, console-paste limits, recovery, flash-write safety |
-| [building.md](building.md) | Prerequisites, applying the overlay, building, verifying, bumping the pinned revision |
+| [building.md](building.md) | Prerequisites, applying the overlay, the mandatory kernel options, package seeding, building, verifying, bumping the pinned revision |
+| [sysupgrade.md](sysupgrade.md) | Persistent install: `MTD_BLOCK` and devtmpfs, `platform.sh`, writing slot B, which regions are safe to write, and what survives an upgrade |
 | [image-builder.md](image-builder.md) | Why the upstream Image Builder cannot build this board, and how to produce and use this project's own |
 
 ## Background

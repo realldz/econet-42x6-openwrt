@@ -1,0 +1,56 @@
+--- a/mt7915/init.c
++++ b/mt7915/init.c
+@@ -301,9 +301,39 @@
+ 	return 0;
+ }
+ 
++/* MT7916 PCIe (PCI id 0x7906, board Econet vGP-42X6V1): khoi LED noi bo
++ * (MT_LED_STATUS_0/1 + MT_LED_EN + MT_LED_CTRL) KHONG dieu khien duoc muc pad
++ * LED cua board nay. Da do tai cho (2026-10-07): dat PWM (STATUS), TX_BLINK,
++ * BLINK_MODE, POLARITY deu khong doi muc den. Thu duy nhat lai duoc den la
++ * truong mux 4 bit cua pad trong MT_LED_GPIO_MUX1:
++ *     pad 14 = bits [27:24], pad 15 = bits [31:28]
++ *     ma 4 -> den SANG, ma 0 -> den TAT
++ * => voi chip nay dung mux lam cong tac bat/tat; viec nhay de LED core lam bang
++ *    phan mem (xem cho gan callback: khong gan blink_set cho 0x7906).
++ * Xem docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
++ */
++static void mt7915_led_mux_set(struct led_classdev *led_cdev, bool on)
++{
++	struct mt76_phy *mphy = container_of(led_cdev, struct mt76_phy, leds.cdev);
++	struct mt7915_dev *dev = container_of(mphy->dev, struct mt7915_dev, mt76);
++	/* DBDC: band 0 -> pad 14 ([27:24]), band 1 -> pad 15 ([31:28]) */
++	u32 shift = mphy->band_idx ? 28 : 24;
++	u32 mask = GENMASK(shift + 3, shift);
++
++	/* dung mt76_rmw (khong phai mt76_rmw_field: FIELD_PREP doi mask HANG SO) */
++	mt76_rmw(dev, MT_LED_GPIO_MUX1, mask, on ? 4U << shift : 0);
++}
++
+ static void mt7915_led_set_brightness(struct led_classdev *led_cdev,
+ 				      enum led_brightness brightness)
+ {
++	struct mt76_phy *mphy = container_of(led_cdev, struct mt76_phy, leds.cdev);
++
++	if (mt76_chip(mphy->dev) == 0x7906) {
++		mt7915_led_mux_set(led_cdev, brightness != LED_OFF);
++		return;
++	}
++
+ 	if (!brightness)
+ 		mt7915_led_set_config(led_cdev, 0, 0xff);
+ 	else
+@@ -509,7 +539,12 @@
+ 	/* init led callbacks */
+ 	if (IS_ENABLED(CONFIG_MT76_LEDS)) {
+ 		mphy->leds.cdev.brightness_set = mt7915_led_set_brightness;
+-		mphy->leds.cdev.blink_set = mt7915_led_set_blink;
++		/* MT7916 PCIe (0x7906): khoi LED phan cung khong lai duoc pad
++		 * nen KHONG gan blink_set - LED core se tu nhay bang timer
++		 * phan mem goi brightness_set (nhip lay tu bang mt76_tpt_blink,
++		 * 334 ms khi ranh -> 50 ms khi 300 KB/s). */
++		if (mt76_chip(&dev->mt76) != 0x7906)
++			mphy->leds.cdev.blink_set = mt7915_led_set_blink;
+ 	}
+ }
+ 

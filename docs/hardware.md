@@ -28,6 +28,8 @@ reproduced in this public document. The serial appears below as `<SERIAL>`.
 | Wi-Fi | Single MediaTek MT7916 card on PCIe (see section 5) |
 | Ethernet | 4x GbE switch integrated inside the EN7523 (see section 7) |
 | VoIP | Not populated on this unit (`TCSUPPORT_VOIP` is commented out in the vendor build config) |
+| Front-panel LEDs | Blue power = GPIO27, green pon = GPIO10, red los/alm = GPIO6, blue inet/int = GPIO1 -- all measured, see section 9 |
+| Buttons | Reset = GPIO0 (`KEY_RESTART`), WPS = GPIO7 (`KEY_WPS_BUTTON`, polled) -- see section 9 |
 
 Evidence for the CPU mode: vendor build config has `TCSUPPORT_CPU_EN7523=y`,
 `TCSUPPORT_CPU_ARMV8=y` and `# TCSUPPORT_CPU_ARMV8_64 is not set`; the U-Boot env reports
@@ -41,8 +43,10 @@ Evidence for the CPU mode: vendor build config has `TCSUPPORT_CPU_EN7523=y`,
 | ATF / TCBoot reservation | `0x80000000..0x80200000`, 2 MiB | Encoded as `/memreserve/ 0x80000000 0x200000` in the board DTS. Boot-log evidence places ATF at the bottom of DRAM (measured `0x80000000..0x80040000`), and TCBoot/U-Boot relocates itself higher in RAM (`U-Boot at: 0x9ee03000`) |
 | Usable memory range | `0x80200000`, `0x1fe00000` (510 MiB) | Device tree `linux,usable-memory-range` |
 | Measured RAM | `MemTotal 480136 kB` (live) | U-Boot reports `DRAM: 496 MiB`; the M1 boot log reports `Memory: 452416K/522240K available`. The difference from 512 MB is held by ATF and NPU/other carve-outs |
+| QDMA DMA buffers | `0x87000000` + 32 MiB (`qdma0-buf`), `0x89000000` + 16 MiB (`qdma1-buf`) | Added by the board device tree with `no-map`; the frame engine's ring buffers (section 7). `en7523.dtsi` already reserves five NPU regions starting at `0x84000000`, so the board DTS extends that node rather than declaring a second `reserved-memory` node |
 
-No other reserved or carve-out regions have been established by the available evidence.
+The two DMA windows are the only further carve-outs established since; they belong to the Ethernet
+block described in section 7.
 
 **Consequence for the OpenWrt `_text`:** the ARM32 kernel of the `airoha` target must be linked so
 that its physical `_text` lands inside the usable range and is 2 MiB aligned -- with
@@ -108,6 +112,35 @@ with size `0x286C76` and `rootfs` at `0x034EC76`, which implies an `0x8000` gap 
 (`0x00C0000 + 0x286C76 = 0x346C76`). The offset/size pairs are reproduced verbatim from the live
 `/proc/mtd` capture; the gap is presumably padding or a transcription artifact in the source note.
 
+### The vendor / factory region
+
+The trailing raw region is not an mtd partition and is never written (section 10). It is the vendor's
+own storage, and it is where this unit's per-unit data lives:
+
+| Offset | Contents |
+|---|---|
+| `0x6E40000` | second copy of the gzip `romfile`, byte-identical to mtd1 when decompressed |
+| `0x6F00000` | factory block, magic `0x12344321` at +0x004: model string at +0x21C, GPON serial at +0x2BC, laser BOB calibration at +0x497 |
+| `0x6FC0000` | one byte, ASCII `1` (A/B boot-flag candidate, not fully reconciled) |
+| `0x75E0000` | `RAWB` marker |
+| `0x7FE0000` | `BMT`, the vendor bad-block table |
+
+What that data is:
+
+* **GPON identity** -- model, equipment ID and the ONU serial, plus the PLOAM registration password
+  field (empty on this unit, which registers by serial);
+* **laser calibration** -- the BOB blob for the EN7571 laser driver, which the vendor reads with
+  `mtd bob get` (section 8). Treat that command as a write: it unlocks the raw area first;
+* **the base MAC address** -- not in the EFuse (blank) and not in the factory block: it is in the
+  vendor configuration that sits gzipped inside the `romfile` partition (mtd1), from which the stock
+  firmware materialises `/etc/mac.conf`. The same value is what U-Boot reports as `ethaddr`.
+
+OpenWrt does **not** read any of it yet: the board device tree declares no nvmem cell and no
+`nvmem-layout`, so Wi-Fi takes its MAC from a patched default blob ([wifi.md](wifi.md) section 4) and
+the PON identity is unused. The intended way to consume the region is a read-only `fixed-partition`
+covering the factory block plus nvmem cells for the serial, the BOB blob and the base MAC -- laid out
+so that the `BMT` at the end of the chip is never touched.
+
 ## 5. PCIe
 
 | Item | Value |
@@ -115,7 +148,7 @@ with size `0x286C76` and `rootfs` at `0x034EC76`, which implies an `0x8000` gap 
 | Root complex, port 0 | `14c3:0810` at `0000:00:00.0`, class `0x060400`, header type 01 (bridge), register base `0x1fa91000` |
 | Root complex, port 1 | `14c3:0811` at `0001:00:01.0`, class `0x060400`, header type 01 (bridge), register base `0x1fa92000` |
 | RC memory windows | port 0: `0x20000000..0x21ffffff` (bus `0000:01`); port 1: `0x22000000..0x23ffffff` (bus `0001:01`) |
-| RC Command register | Both root ports read `Command = 0x0140` (Memory Space Enable = 0, Bus Master Enable = 0) and the value is a read-only mirror: writes are swallowed. This is not the Wi-Fi root cause -- see the link below |
+| RC Command register | Both root ports read `Command = 0x0140` (Memory Space Enable = 0, Bus Master Enable = 0) and the value is a read-only mirror: writes are swallowed. This is not the Wi-Fi root cause -- see the link below. With the quirk applied they read `0x0146` on a clean boot |
 | Wi-Fi card | One MediaTek MT7916 (802.11ax), exposed as two PCIe functions |
 | Function 1 -- HIF | `14c3:790a` on pcie0, endpoint `0000:01:00.0`. BAR0 `0x20000000` (measured aperture `0x20000000..0x200fffff`, 1 MiB), BAR2 `0x20100000` (32 KiB), BAR4 `0x20108000` (4 KiB) |
 | Function 2 -- WF | `14c3:7906` on pcie1, endpoint `0001:01:00.0`. BAR0 `0x22000000` (measured aperture `0x22000000..0x220fffff`, 1 MiB), BAR2 `0x22100000` (32 KiB), BAR4 `0x22108000` (4 KiB) |
@@ -162,15 +195,27 @@ nothing is printed until a key is pressed. Flash access and the U-Boot recovery 
 | Ports | 4x Gigabit Ethernet |
 | Switch | Integrated in the EN7523 -- no external switch chip (`# TCSUPPORT_MT7530_EXTERNAL is not set` in the vendor build config); the vendor stack is switch-IP comparable to MT7530 (`libmtkswitch.so` in user space, `qdma_lan.ko` / `qdma_wan.ko` in the kernel) |
 | Hardware block name | `frame_engine@1fb50000` -- the FE/GDM/QDMA family, the same family as the upstream `airoha_eth` driver but a different generation |
+| Frame engine (FE) node | `ethernet@1fb50000` (`airoha,en7523-eth`): `fe` `0x1fb50000`+`0x2600`, `qdma0` `0x1fb54000`+`0x2000`, `qdma1` `0x1fb56000`+`0x2000`, `gdmp` `0x1fbf9000`+`0x1000`; ten GIC SPIs (`37, 55, 56, 57, 38, 58, 59, 60, 49, 64`); resets `FE`, `FE_PDMA`, `FE_QDMA`, `DUAL_HSI0_MAC`, `DUAL_HSI1_MAC`, `HSI_MAC`, `GDMP` |
+| GDM ports | Three internal MACs. **GDM1** (`ethernet@1`, child of the FE) is `phy-mode = "internal"` and faces the internal switch -- it is the one that carries the four LAN ports. **GDM2** faces the PON MAC (SGMII / 2500Base-X; needs the PON PCS, not enabled). **GDM3** faces the USB serdes (not enabled) |
+| Internal switch (GSW) | `switch@1fb58000` (`0x1fb58000`+`0x8000`), `compatible = "airoha,en7523-switch"`, `GIC_SPI 31`, reset `GSW`; four user ports `lan1`-`lan4` with internal PHYs at MDIO addresses 9-12, plus CPU port 6 wired to GDM1 over a declared 10 Gbit/s fixed link |
+| DMA buffers | `qdma0-buf` at `0x87000000` (32 MiB) and `qdma1-buf` at `0x89000000` (16 MiB), `no-map`, used as the frame engine's ring buffers -- see section 2 |
 | Port map | The switch exposes 5 ports; physical port 4 is the uplink used as etherWAN (netdev `nas10`), ports 1-3 are LAN (`eth0.1`/`eth0.2`/`eth0.3`). In board terms: LAN1-3 are LAN, LAN4 can be the Ethernet WAN |
 | Ethernet WAN | Supported by the vendor firmware (`TCSUPPORT_WAN_ETHER=y`, `serdes_sel=0` in the U-Boot env) |
 
-**No driver exists for the EN7523 Ethernet block.** It is not present in mainline 6.18.54 and not in
-the OpenWrt `airoha` target's `patches-6.18`; the target's `airoha_eth` driver only matches
-`airoha,en7581-eth` and `airoha,an7583-eth`. The target device tree `dts/en7523.dtsi` contains no
-ethernet/GDM/switch node at all -- only `uart1`, `gpio0`/`gpio1`, `pcie0`/`pcie1`, SPI+NAND, SCU and
-GIC. Bringing up the four GbE ports therefore requires a new `en7523_soc_data` for `airoha_eth`
-plus the missing DT nodes.
+**Driver status.** Mainline 6.18.54, and the OpenWrt `airoha` target's `patches-6.18`, carry no EN7523
+Ethernet support: the target's `airoha_eth` driver matches only `airoha,en7581-eth` and
+`airoha,an7583-eth`, and the target device tree `dts/en7523.dtsi` has no ethernet/GDM/switch node at
+all -- only `uart1`, `gpio0`/`gpio1`, `pcie0`/`pcie1`, SPI+NAND, SCU and GIC. The board support
+therefore adds a ten-patch series (`930-42`..`930-51`) that gives `airoha_eth` the EN7523 SoC data
+plus the FE/QDMA/GDMP and GDM nodes, and describes the internal switch -- which the existing MT7530
+DSA driver drives in MMIO mode (`CONFIG_NET_DSA_MT7530_MMIO`), with its LED controller enabled for
+EN7523 (`930-44`). It also adds the PON PCS and the USB-serdes side of `930-49`..`930-51`, which are
+present but not enabled on this board.
+
+With that series the four ports come up. Measured: `br-lan` contained `lan2`, `lan3`, `lan4` and both
+AP interfaces, with `lan1` moved out of the bridge to serve as the Ethernet WAN, and a client behind
+a cable reached the board and, through the Wi-Fi AP, the air
+([wifi.md](wifi.md) section 10). Switch throughput has **not** been benchmarked.
 
 ## 8. Optical / PON hardware
 
@@ -181,7 +226,7 @@ plus the missing DT nodes.
 | Driver identity on this unit | The BOB blob in the factory block carries magic `0x07050701` = profile GPON (`0x07`) + laser variant `0x01`, and variant `0x01` is EN7571 in the public `airoha_lddla.h`. The stock OMCI adapter library also contains the literal string `EN7571` |
 | Public driver | `compatible = "airoha,en7571"` in `drivers/net/optical/en7571*`, with `firmware-name` defaulting to `airoha/en7571_bob.bin`, accepting a BOB payload of 161 to 512 bytes |
 | BOB calibration location | Factory block at `0x6F00000` + `0x497`, i.e. flash offset `0x6F00497`; the magic `0x07050701` sits at blob + 0x94 (flash `0x6F0052B`) |
-| BOB calibration size | 225-byte payload; the remainder of the read window is `0xFF`. The extracted artifact is 400 bytes (`0x6F00497` + 400, `0xFF` padded); a live read with the vendor tool returns 256 bytes, and the first 256 bytes are byte-for-byte identical to the artifact (sha256 `96d848fdfb9078a79acf59c242a9249b0b247ff2d38194fe05fe19355056f863`) |
+| BOB calibration size | 225-byte payload; the remainder of the read window is `0xFF`. The extracted artifact is 400 bytes (`0x6F00497` + 400, `0xFF` padded); a live read with the vendor tool returns 256 bytes, and the first 256 bytes match the offline artifact byte for byte (the digest is not published here: it fingerprints one unit's laser calibration) |
 | PON blocks in the vendor device tree | xPON MAC `xpon@1fb64000` (IRQs 42 and 34 reported), PON PHY `pon_phy@1faf0000` (IRQ 43), PON PCS/SGMII `pon_hsgmii@1fa65000` (IRQ 66). The public EN7523 rewrite places the MAC at `0x1fb60000` and the PCS at `0x1fa08000`; the two sets of base addresses are not reconciled in the notes |
 | Vendor read tool | `/userfs/bin/mtd bob get <file>` prints `read bob magic code is 0x07050701` and returns 256 bytes. Treat it as a write operation: it prints `Unlocking reservearea ...` and writes an unlock marker into the raw area before reading |
 
@@ -207,33 +252,61 @@ etherWAN mode), `/proc/pon_phy/info` reported `PHY Status: unplug`, and LOS = 1.
 
 ## 9. GPIO / LEDs / buttons
 
+**Pin controller.** The board no longer uses the legacy `gpio0`/`gpio1` bank nodes: the device tree
+deletes both and declares one pin controller in their place.
+
+| Item | Value |
+|---|---|
+| Node | `system-controller@1fbf0200` (`syscon`, `simple-mfd`), window `0x1fbf0200` + `0xc0` |
+| Child | `pinctrl`, `compatible = "airoha,en7523-pinctrl"` |
+| Required phandle | `airoha,chip-scu = <&scu>` -- without it the probe returns `-ENODEV` and there is no gpiochip at all |
+| Interrupt | `GIC_SPI 26` |
+| Lines | 30, `GPIO0..GPIO29`; `gpio-ranges = <&en7523_pinctrl 0 12 30>` maps line N to internal pin N+12, so `<&en7523_pinctrl N>` is the old `<&gpio0 N>` |
+| Why the old banks go | they decode the same window (`0x1fbf0200`-`0x1fbf02bf`), so the pinctrl driver and the legacy banks cannot coexist |
+| IOMUX | the pinctrl probe zeroes five SCU IOMUX registers (`0x1fbf0210`, `0214`, `0218`, `0220`, `0224`) -- on EN7523 a zero means "GPIO". A pad that stays mute is usually held by `REG_GPIO_FLASH_MODE_CFG` (`0x1fbf0234` / `0x1fbf0268`), which is **not** cleared |
+
+**Measured front-panel map.** The vendor LED table (`userfs/7523duled.conf`) does not match this
+board, so the map below comes from measurement: drive one pad to 0 with every other pad at 1, then
+read the pad data register back to confirm the level actually changed.
+
+| Function | Pad | Notes |
+|---|---|---|
+| Power LED (blue) | GPIO27 | `default-state = "on"` is required: bit 27 of the pad data register reads 0 at power-on, so the LED is already lit before any driver runs |
+| PON LED (green) | GPIO10 | |
+| LOS LED (red) | GPIO6 | The silkscreen calls it ALM; the pad is the LOS/ALM LED. (An earlier revision drove pad 6 as the 2.4 GHz LED: wrong.) |
+| Internet LED (blue) | GPIO1 | Silkscreen: INET |
+| Reset button | GPIO0 | `KEY_RESTART`. Quick press reboots, holding it ~5 s factory-resets. Verified on hardware: `pressed`/`released` are logged |
+| WPS button | GPIO7 | `KEY_WPS_BUTTON`, polled (`gpio-keys-polled`, 100 ms) |
+| LAN1-LAN4 LEDs | pads 22-25 | **Not** GPIO-controllable: the pads are muxed to the internal switch's LED engine (`SCU 0x1fa20210`, LAN0..3_LED0_MODE = 1). They work; Linux cannot drive them |
+| WLAN 2.4/5 GHz LEDs | -- | Driven by the MT7916 through its pad mux (`MT_LED_GPIO_MUX1`, `0x70005054`; pad 14 = 2.4 GHz, pad 15 = 5 GHz) -- see [wifi.md](wifi.md) section 12 |
+| WPS LED | unknown | **Not reachable.** No pad responded while the button was held (28 safe pads tried). The remaining candidates are pad 16 (laser TX-disable) and pad 28 (PCIe reset0), both hazardous to drive. Open item |
+
+Pads that were tested and have **no** LED at all: 2, 3, 4, 5, 8, 9, 11, 12-21, 26. Pads 28 and 29
+also read as having no LED, but they are the PCIe resets, so they were not driven as part of the LED
+search. In particular pad 11 (which the vendor table calls PWR) and pads 3 and 26 (vendor: LOS, WPS)
+are mute; an earlier revision of the board support drove pad 11 as the power LED, which is why the
+power LED could not be controlled at the time.
+
+The vendor U-Boot env agrees with the measurement where its values decode as hex pad numbers:
+`internet_gpio = 01` is pad 1 (INET), `dsl_gpio = 0a` is pad 10 (the PON LED), and the
+`multi_upgrade_gpio` list `0b0a03010604051b1a` contains `1b` = pad 27 (power) and `1a` = pad 26. It is
+also a reminder that the vendor table is only a hint: `power_gpio = 1515` does not decode as a single
+pad and is left unexplained.
+
+The two buttons sit on pads the pinctrl can see. The device tree nevertheless keeps
+`gpio-keys-polled` (100 ms) even though the pinctrl node provides an interrupt controller, because
+the move away from the legacy banks was made one variable at a time; interrupt-driven `gpio-keys` is
+a listed follow-up. The often-quoted reason for polling -- that only GPIO0..GPIO15 are
+interrupt-capable here -- is **not re-verified** in the sources behind this document.
+
 **Laser enable / TX disable.** The vendor `userfs/led.conf` line `42 16 1 0 1` maps
 `LED_PHY_TX_POWER_DISABLE` to **GPIO 16**, mode 1 (ONOFF). Two caveats:
 
 - The polarity is **not confirmed**. Both polarities have to be tried on hardware before the value
-  is trusted (`tx-disable-gpios = <&gpio0 16 ...>` with the active level tested either way).
-- The number 16 comes from the vendor GPIO framework, which numbers lines 0-63. The Linux split
-  (`gpio0` covering 0-31, `gpio1` covering 32-63) makes `&gpio0 16` the likely mapping, but the bank
-  has not been verified against the pinmux.
-
-**Board LEDs and buttons: not established by the available evidence.** No LED and no button has been
-correlated with a physical GPIO on this unit. The only additional GPIO-related data in the sources
-are vendor configuration strings from the U-Boot env and the vendor build config, and none of them
-has been tied to a physical LED, button or header:
-
-```
-power_gpio          = 1515
-internet_gpio       = 01
-ether_gpio          = 0c
-dsl_gpio            = 0a
-multi_upgrade_gpio  = 0b0a03010604051b1a
-gpio_active_high    = ...0000000000111100
-qdma_init           = 33
-```
-
-No reset-button GPIO is established. On the OpenWrt side, both `gpio0` and `gpio1` are enabled in the
-board device tree, so board LEDs and buttons can be added later once they are mapped; until then the
-DTS defines none.
+  is trusted (`tx-disable-gpios = <&en7523_pinctrl 16 ...>` with the active level tested either way).
+- The number 16 comes from the vendor GPIO framework, which numbers lines 0-63. With the pinctrl in
+  place the same pad is line 16 and GPIO 16 is inside the 30-line range, but no node drives it yet,
+  and the pad must stay untouched until the laser driver owns it (see the hazards in section 10).
 
 ## 10. Safe-to-write rules
 
@@ -260,3 +333,15 @@ DTS defines none.
 9. **Keep a full 128 MB dump and a CH341A programmer on hand** before any operation, and keep U-Boot
    console access available: the stock autoboot path for slot A is broken when its FIT image is
    damaged, and a re-flash is then the only way back.
+
+### Hazards: pads and register windows that must not be touched
+
+The flash rules above are one class of hazard. The others are the pads and the PCIe window:
+
+| Hazard | Why |
+|---|---|
+| Pad 16 (`PHY_TX_POWER_DISABLE`) | The PON laser's TX-disable line (vendor `led.conf` line `42 16 1 0 1`, independently confirmed). Driving it disables the optical transmitter -- or, with the polarity reversed, may enable it. Leave it to the laser driver |
+| Pad 29 (`pcie_reset1`) and pad 28 (`pcie_reset0`) | PCIe resets. Pulling either low resets the link: the MT7916 disappears and Wi-Fi is gone until the next power cycle. The vendor LED table lists pad 29 as the Internet LED, which is wrong on this board |
+| Reading a PCI BAR while `PCI_COMMAND.MEMORY` is 0 | Hangs the whole SoC until the power is cycled -- no watchdog recovery. Analysed in [pcie-root-cause.md](pcie-root-cause.md) section 2 |
+| Pads 22-25 | Muxed to the internal switch's LED engine; driving them as GPIO achieves nothing |
+| Flash | Slot B only; see items 1-4 above |

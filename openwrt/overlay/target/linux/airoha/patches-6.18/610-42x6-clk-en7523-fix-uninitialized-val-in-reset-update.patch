@@ -1,0 +1,45 @@
+clk: en7523: fix uninitialized `val` in en7523_reset_update()
+
+Patch 609-02-clk-en7523-add-support-for-dedicated-PCIe-PERSTOUT-reset.patch
+thay bieu thuc dung bang mot bien `val` KHONG duoc khoi tao, roi lai dung `|=`:
+
+    u32 addr = rst_data->bank_ofs[id / RST_NR_PER_BANK];
+    u32 val;                                  /* <-- khong khoi tao */
+    /* For PCIC reset logic is inverted, 0:assert 1:deassert*/
+    if (addr == REG_NP_SCU_PCIC)
+        val |= assert ? 0 : BIT(id % RST_NR_PER_BANK);
+    else
+        val |= assert ? BIT(id % RST_NR_PER_BANK) : 0;
+    regmap_update_bits(rst_data->map, addr, BIT(id % RST_NR_PER_BANK), val);
+
+Truoc 609-02 ham nay dung (khong co bien trung gian):
+
+    regmap_update_bits(rst_data->map, addr, BIT(id % RST_NR_PER_BANK),
+                       assert ? BIT(id % RST_NR_PER_BANK) : 0);
+
+Vi mask chi co MOT bit, gia tri ghi vao thanh ghi chinh la bit do. Vay:
+  - nhanh assert  : val |= BIT(...)  -> bit luon = 1  (dung)
+  - nhanh deassert: val |= 0         -> bit = BIT RAC tren stack  (SAI)
+
+Hau qua tren EN7523 (vgP-42X6V1): reset_control_bulk_deassert() van tra ve 0
+(khong bao loi), nhung bit 21 cua SCU RST_CTRL1 (0x1fb00834) - chan FE - co the
+van = 1, tuc FE bi GIU trong trang thai reset. Lan doc MMIO dau tien vao FE
+(0x1fb50500, REG_GDM_FWD_CFG(1)) khi do treo CPU vinh vien: AXI slave khong phan
+hoi va khong co bus timeout. Quan sat: kernel dung ngay sau marker
+AIROHA-TRACE maccr-01-portloop, tuc ben trong vong lap dau tien cua
+airoha_fe_maccr_init().
+
+Sua: khoi tao `u32 val = 0;`. Vi mask chi 1 bit, gia tri 0 khoi phuc dung ngu
+nghia truoc 609-02:
+  - non-PCIC: assert -> 1, deassert -> 0
+  - PCIC    : dao nguoc (assert -> 0, deassert -> 1) nhu chu thich
+
+Bug nay anh huong MOI reset line non-PCIC (FE/PDMA/QDMA/XSI MAC/GSW/...), khong
+chi rieng ethernet.
+--- a/drivers/clk/clk-en7523.c
++++ b/drivers/clk/clk-en7523.c
+@@ -1030,3 +1030,3 @@
+ 	struct en_rst_data *rst_data = container_of(rcdev, struct en_rst_data, rcdev);
+ 	u32 addr = rst_data->bank_ofs[id / RST_NR_PER_BANK];
+-	u32 val;
++	u32 val = 0;

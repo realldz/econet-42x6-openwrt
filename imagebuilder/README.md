@@ -18,8 +18,18 @@ Quick reference:
 | File | Purpose |
 |---|---|
 | `build-image.sh` | Extracts the Image Builder, runs `make image`, and collects the results with checksums. |
-| `packages.txt` | Curated optional package list used by `--all-packages`. Comment out what you do not want. |
-| `files/` | Overlay copied into the image root. Currently a single first-boot script setting the hostname -- deliberately minimal, see the doc. |
+| `packages.txt` | Curated package list used by `--all-packages`: the Wi-Fi AP daemon, the web UI, the package manager and diagnostics. Comment out what you do not want. The board needs them baked in, because target airoha/en7523 is source-only and has no package feed. |
+| `files/` | Overlay copied into the image root. Currently a single first-boot script setting the hostname -- deliberately minimal, because the board generates its own network and wireless configuration, and the wireless interfaces stay disabled until an operator enables them. |
+
+Two things that commonly go into `files/`:
+
+* `/etc/config/wireless` -- if you want a pinned configuration instead of the
+  generated one, start from
+  [`openwrt/optional-configs/etc-config-wireless.example`](../openwrt/optional-configs/etc-config-wireless.example).
+* `/lib/firmware/mediatek/mt7916_eeprom.bin` -- the default eeprom blob with
+  your unit's MAC written into it, otherwise Wi-Fi comes up with a random MAC
+  on every boot. Produce it with
+  [`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py).
 
 You can also drive the Image Builder directly:
 

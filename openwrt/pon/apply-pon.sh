@@ -43,7 +43,7 @@ NEW_FILES=(
   net/xpon/omci/identity.c net/xpon/omci/internal.h net/xpon/omci/me.c net/xpon/omci/me.h
   net/xpon/omci/profiles.c net/xpon/omci/sysfs.c net/xpon/omci/wire.c net/xpon/omci/wire.h
   include/net/xpon.h include/net/xpon/oam.h include/net/xpon/omci.h include/uapi/linux/xpon.h
-  include/linux/optical_frontend.h include/linux/phy/phy-airoha-xpon.h
+  include/uapi/linux/omci.h include/linux/optical_frontend.h include/linux/phy/phy-airoha-xpon.h
   drivers/net/optical/Kconfig drivers/net/optical/Makefile drivers/net/optical/core.c
   drivers/net/optical/hwmon.c
   drivers/net/optical/airoha/Kconfig drivers/net/optical/airoha/Makefile
@@ -97,7 +97,7 @@ cat <<EOF
   #     \$KDIR/drivers/phy/airoha/Makefile     -> obj-\$(CONFIG_PHY_AIROHA_XPON) += phy-airoha-xpon.o
   #     \$KDIR/drivers/net/pcs/Kconfig|Makefile: only add if there is no airoha/ hook yet
 
-  # (d) BIGGEST TASK: port the 14 xPON hooks into airoha_eth.c (see pon/README.md section 3)
+  # (d) BIGGEST TASK: port the 17 xPON hooks into airoha_eth.c (see pon/README.md section 3)
 
   # (e) pinctrl: add the "pon" function/group to pinctrl-en7523.c
   #     (or make pinctrl-0 optional in phy-airoha-xpon.c)

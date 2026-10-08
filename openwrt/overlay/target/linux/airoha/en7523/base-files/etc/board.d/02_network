@@ -1,0 +1,45 @@
+#!/bin/sh
+#
+# Default network configuration for the Econet vG vGP-42X6V1 (airoha, en7523).
+#
+# WHY THIS FILE IS NEEDED
+# -----------------------
+# The en7523 subtarget ships no base-files/etc/board.d, so only the generic
+# package/base-files/files/etc/board.d/99-default_network runs, and it sets:
+#
+#     network.lan.device = 'eth0'
+#
+# On this board 'eth0' is the DSA CONDUIT of the internal MT7530 switch
+# (switch@1fb58000), not a LAN port.  Observed on real hardware when this file
+# is missing:
+#
+#   1. br-lan contains only eth0, so all four switch ports (DSA user ports)
+#      stay outside the bridge.
+#   2. DSA refuses to put a user port into a bridge that already holds the
+#      conduit:
+#        # ip link set lan4 master br-lan
+#        RTNETLINK answers: Invalid argument
+#   3. The ports belong to no firewall zone, so netfilter rejects input:
+#        ping from a PC  -> "Destination port unreachable"
+#        TCP 22          -> TcpTestSucceeded : False
+#
+# The netdev names lan1..lan4 come from the `label` property of port@1..4 in
+# the board device tree (net/dsa/user.c: port->name <- of_get_property(dn,
+# "label")).
+#
+# Declaring LAN as the four user ports makes config_generate build br-lan out
+# of lan1..lan4 while the conduit stays out of it -- the way every DSA target
+# does it.  This is also what gives the four front-panel LAN sockets their
+# default LAN role; moving one of them to WAN is a normal UCI/LuCI change.
+#
+. /lib/functions/uci-defaults.sh
+
+case "$(board_name)" in
+econet,vgp-42x6v1)
+	board_config_update
+	ucidef_set_interface_lan "lan1 lan2 lan3 lan4"
+	board_config_flush
+	;;
+esac
+
+exit 0

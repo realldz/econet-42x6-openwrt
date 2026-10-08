@@ -66,6 +66,8 @@ jobs:
           set -e
           # The point is to keep Vietnamese comments out of the repository, which
           # is English-only. Binary assets are excluded by extension.
+          # The last four globs cover files with no extension or an unusual one:
+          # board.d/02_network, the uci-defaults scripts, *.append, *.example.
           fail=0
           while IFS= read -r f; do
             if LC_ALL=C grep -qP '[^\x00-\x7F]' "$f"; then
@@ -73,5 +75,6 @@ jobs:
               LC_ALL=C grep -nP '[^\x00-\x7F]' "$f" | head -5
               fail=1
             fi
-          done < <(git ls-files '*.sh' '*.py' '*.md' '*.dts' '*.dtsi' '*.patch' '*.mk' '*.env' '*.yml' '*.yaml' '*.txt' 'Makefile')
+          done < <(git ls-files '*.sh' '*.py' '*.md' '*.dts' '*.dtsi' '*.patch' '*.mk' '*.env' '*.yml' '*.yaml' '*.txt' 'Makefile' \
+                     '*.append' '*.example' '*/board.d/*' '*/uci-defaults/*')
           exit $fail

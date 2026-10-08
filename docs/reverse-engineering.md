@@ -325,7 +325,8 @@ tool on the running unit can read it directly:
 
 which prints `read bob magic code is 0x07050701` and returns 256 bytes. Reading
 that live dump and the offline extraction byte-for-byte, the first 256 bytes are
-identical (sha256 `96d848fdfb9078a79acf59c242a9249b0b247ff2d38194fe05fe19355056f863`).
+identical (the digest is not published here: it fingerprints one unit's laser
+calibration).
 So the offset, the size and the content are all confirmed by two independent
 paths, not by arithmetic alone.
 
@@ -596,7 +597,8 @@ the interpretation.
   `libmtkswitch.so`), not a source tree. Reading the vendor binaries gave register
   knowledge but not a driver. Mainline `airoha_eth` matches only `en7581` and
   `an7583`, and the OpenWrt target's `en7523.dtsi` has no ethernet/GDM/switch
-  node at all. Nothing in this analysis changed that.
+  node at all. Nothing in this analysis changed that. Ethernet was later brought
+  up from a different source -- see [docs/ethernet.md](ethernet.md).
 - **It did not produce a working PON driver.** The vendor `xpon` and PON PHY
   code is built into the vendor kernel, and the userspace is a set of `.ko` files
   and libraries. Recovering symbols and disassembling them does not yield a

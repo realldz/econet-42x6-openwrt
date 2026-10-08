@@ -1,0 +1,83 @@
+# Example /etc/config/wireless for the vGP-42X6V1.
+#
+# This file is NOT installed by default.  The project deliberately ships no
+# /etc/config/wireless: upstream OpenWrt lets the board generate it on first
+# boot through the wifi-detect hotplug script, with the wireless interface
+# disabled until the operator enables it.  If you want a pinned configuration
+# instead, copy this file to
+#
+#     target/linux/airoha/en7523/base-files/etc/config/wireless
+#
+# in your OpenWrt tree (or into the Image Builder's files/etc/config/) and edit
+# the placeholders.
+#
+# Policy: pin the TECHNICAL parameters that were measured and optimised for this
+# board, and leave the operator's choices (SSID, key, encryption, PMF) to the
+# web UI.  That is why there is no ssid / encryption / key below.
+#
+#   * wifi-device keeps only technical settings:
+#       - `path`  binds the right mini-PCIe function.  The MT7916 is DBDC: one
+#                 PCI device, two PHYs, so radio1's path is radio0's path with a
+#                 `+1` suffix.  A wrong path means netifd cannot bind the radio.
+#       - `band` / `channel` / `htmode`: 2.4 GHz channel 6 HE20, 5 GHz channel 36
+#                 HE80.  Channel 36 is not a DFS channel, so the AP starts
+#                 immediately.  Verified on hardware: hostapd goes COUNTRY_UPDATE
+#                 -> HT_SCAN -> AP-ENABLED on both radios.
+#       - `country` + `txpower`: technical and legal, see below.
+#       - `macaddr`: the unit's own address.  Replace the placeholder with the
+#                 MAC that belongs to your board.
+#   * wifi-iface keeps only what is structurally required (`device`,
+#     `network 'lan'`, `mode 'ap'`) plus `disabled '1'`, matching upstream
+#     behaviour: the interface stays down until the operator enables it.
+#
+# Why pin country and txpower:
+#   * with a correct regdomain the allowed limits are applied by the kernel, and
+#     5 GHz channel 36 in an 80 MHz block is permitted in most of the world --
+#     check your own country's entry before you enable a radio;
+#   * without a pinned txpower the driver takes the ceiling from the (blank-EFuse)
+#     default eeprom: MEASURED 29 dBm on 2.4 GHz and 23 dBm on 5 GHz.  29 dBm is
+#     about 800 mW, far above what most regulators allow, so pin the value;
+#   * `txpower '20'` means 20 dBm at the connector.  There is no per-board gain
+#     data (the EFuse is blank), so 20 dBm is a deliberately conservative value.
+#     Raise it in the web UI if your installation and your regulator allow it.
+#   * do NOT set a different country on one radio to "make 5 GHz work": a wrong
+#     country also raises the ceiling on 2.4 GHz (measured: 29 dBm with a US
+#     regdomain), which is both illegal and unnecessary.
+#
+# The MAC placeholders below are documentation values only.  Use your own unit's
+# addresses, and remember that the driver also needs them in its eeprom blob --
+# see tools/mt7916_eeprom_mac.py.
+
+config wifi-device 'radio0'
+	option type 'mac80211'
+	option path '1fa92000.pcie/pci0001:00/0001:00:01.0/0001:01:00.0'
+	option band '2g'
+	option channel '6'
+	option htmode 'HE20'
+	option cell_density '0'
+	option country 'VN'
+	option txpower '20'
+	# option macaddr '02:00:00:00:00:01'
+
+config wifi-iface 'default_radio0'
+	option device 'radio0'
+	option network 'lan'
+	option mode 'ap'
+	option disabled '1'
+
+config wifi-device 'radio1'
+	option type 'mac80211'
+	option path '1fa92000.pcie/pci0001:00/0001:00:01.0/0001:01:00.0+1'
+	option band '5g'
+	option channel '36'
+	option htmode 'HE80'
+	option cell_density '0'
+	option country 'VN'
+	option txpower '20'
+	# option macaddr '02:00:00:00:00:02'
+
+config wifi-iface 'default_radio1'
+	option device 'radio1'
+	option network 'lan'
+	option mode 'ap'
+	option disabled '1'

@@ -1,28 +1,45 @@
 // SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 /*
- * Econet / vG vGP-42X6V1 -- GPON ONU on the Airoha EN7523 (EN7529CT) SoC
+ * vG/econet vGP-42X6V1 -- GPON ONU on the Airoha/Econet EN7523 SoC
+ * Board bring-up for OpenWrt.
  *
- * Stage 1 board support for OpenWrt: UART console, SPI-NAND partition map and
- * PCIe Wi-Fi. The xPON / optical nodes are deliberately NOT here; they need the
- * kernel patches in openwrt/pon/ and live in en7523-vgp42x6v1-pon.dtsi.
+ * Milestones already validated on real hardware:
+ *   M2/M3: UART + NAND (FIT splits kernel/rootfs/rootfs_data) + UBI overlay on mtd7 + PCIe/WiFi
+ *   M4   : internal Ethernet -- FE/QDMA/GDMP + GDM1 + GSW (MT7530 compatible) -> 4 LAN ports
  *
- * Every value in this file was read from real hardware:
- *   - /proc/mtd, /proc/meminfo, /proc/cmdline
- *   - the stock device tree extracted from the vendor FIT image
+ * Data sources:
+ *  - /proc/mtd, /proc/meminfo, /proc/cmdline (see docs/reverse-engineering.md)
+ *  - the stock device tree extracted from the vendor FIT image
+ *  - eth/gdm1/switch/gsw_port/mdio nodes: from the upstream EN7523 patch series
+ *    (OpenWrt PR #20104, patches 930-42..930-51) -- see docs/ethernet.md
+ *
+ * NOTE: the PON nodes (xpon / xpon_phy / pon_pcs / laser) are NOT here -- they need a
+ * separate config + PON patch (see openwrt/pon/README.md). M4 only enables Ethernet/switch,
+ * so the optical part is still in the "no driver yet" state.
  */
 /dts-v1/;
 
-/* The bootloader (tcboot / U-Boot) places ATF at the start of DRAM. */
+/* ATF is placed at the start of DRAM by the bootloader (tcboot/U-Boot), as in en7523-evb.dts */
 /memreserve/ 0x80000000 0x200000;
 
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/reset/airoha,en7523-reset.h>
 #include "en7523.dtsi"
 
 / {
-	model = "Econet vG vGP-42X6V1";
+	model = "vG/econet vGP-42X6V1";
 	compatible = "econet,vgp-42x6v1", "airoha,en7523";
 
 	aliases {
 		serial0 = &uart1;
+		/* status LEDs for diag.sh / init.d/led (get_dt_led boot|running|...) */
+		led-boot = &led_power;
+		led-running = &led_power;
+		led-failsafe = &led_power;
+		led-upgrade = &led_power;
 	};
 
 	chosen {
@@ -32,25 +49,386 @@
 	};
 
 	/*
-	 * Real DRAM is 512 MiB. Measured live: MemTotal 480136 kB (the first
-	 * ~32 MiB are held by the NPU/ATF). The stock device tree claims
-	 * 0x40000000 (1 GiB), which is wrong -- do not copy it.
+	 * Real RAM = 512 MB. Read live: MemTotal 480136 kB (~32 MiB at the start is reserved
+	 * by NPU/ATF). The stock DT declares 0x40000000 (1 GiB) -- WRONG, do not use.
 	 */
 	memory@80000000 {
 		device_type = "memory";
 		reg = <0x80000000 0x20000000>;
 	};
+
+	/*
+	 * ------------------------------------------------------------------
+	 * Internal Ethernet (M4)
+	 * ------------------------------------------------------------------
+	 * EN7523 has a Frame Engine (FE) + 2 QDMA blocks (PDMA/QDMA) + GDMP, and 3
+	 * internal MAC ports called GDM:
+	 *   GDM1 -> internal switch (GSW) -> 4 LAN PHY ports (phy-mode "internal")
+	 *   GDM2 -> PON MAC (SGMII 2500Base-X) -- needs a PCS node, NOT enabled in M4
+	 *   GDM3 -> USB serdes                              -- NOT enabled in M4
+	 * Driver: drivers/net/ethernet/airoha/airoha_eth.c (CONFIG_NET_AIROHA=y).
+	 * The GSW switch is MT7530 compatible -> use the mt7530 DSA driver (CONFIG_NET_DSA_MT7530_MMIO).
+	 * Addresses/IRQs/resets come from the upstream patch series (930-42..930-51), already
+	 * cross-checked against Kiwironic's working EN7523 board DT.
+	 */
+	eth: ethernet@1fb50000 {
+		compatible = "airoha,en7523-eth";
+		status = "okay";
+
+		reg = <0x1fb50000 0x2600>,
+		      <0x1fb54000 0x2000>,
+		      <0x1fb56000 0x2000>,
+		      <0x1fbf9000 0x1000>;
+		reg-names = "fe", "qdma0", "qdma1", "gdmp";
+
+		resets = <&scu EN7523_FE_RST>,
+			 <&scu EN7523_FE_PDMA_RST>,
+			 <&scu EN7523_FE_QDMA_RST>,
+			 <&scu EN7523_DUAL_HSI0_MAC_RST>,
+			 <&scu EN7523_DUAL_HSI1_MAC_RST>,
+			 <&scu EN7523_HSI_MAC_RST>,
+			 <&scu EN7523_GDMP_RST>;
+		reset-names = "fe", "pdma", "qdma",
+			      "hsi0-mac", "hsi1-mac", "hsi-mac", "gdmp";
+
+		interrupts = <GIC_SPI 37 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 55 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 56 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 57 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 38 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 58 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 59 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 60 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 49 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 64 IRQ_TYPE_LEVEL_HIGH>;
+
+		memory-region = <&qdma0_buf>, <&qdma1_buf>;
+		memory-region-names = "qdma0-buf", "qdma1-buf";
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		gdm1: ethernet@1 {
+			compatible = "airoha,eth-mac";
+			reg = <1>;
+			/* GDM1 only supports "internal" when connected to the internal switch */
+			phy-mode = "internal";
+			status = "okay";
+
+			/*
+			 * Without this property the driver calls of_get_ethdev_address() -> fails
+			 * -> eth_hw_addr_random(): a new MAC on every boot (verified: dmesg
+			 * "generated random MAC address ...", addr_assign_type = 1 =
+			 * NET_ADDR_RANDOM).
+			 * This is the U-Boot ethaddr on this board, also the MAC printed on the label.
+			 * The four lan1..lan4 ports (DSA user ports) inherit this MAC.
+			 * Cleaner upstream solution: an nvmem cell read from the env partition.
+			 *
+			 * PLACEHOLDER: write YOUR unit's own address here.  The address of the
+			 * unit this support was developed on is redacted from this repository
+			 * on purpose -- reusing it would put a duplicate MAC on your network.
+			 * Keep the first octet as written: 02 is a valid unicast, locally
+			 * administered address, so a placeholder cannot collide with a
+			 * vendor-assigned assignment.
+			 */
+			mac-address = [02 00 00 00 00 00];
+
+			fixed-link {
+				speed = <10000>;
+				full-duplex;
+				pause;
+			};
+		};
+	};
+
+	switch: switch@1fb58000 {
+		compatible = "airoha,en7523-switch";
+		reg = <0x1fb58000 0x8000>;
+		resets = <&scu EN7523_GSW_RST>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
+		interrupt-parent = <&gic>;
+		interrupts = <GIC_SPI 31 IRQ_TYPE_LEVEL_HIGH>;
+		status = "okay";
+
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			gsw_port1: port@1 {
+				reg = <1>;
+				label = "lan1";
+				phy-mode = "internal";
+				phy-handle = <&gsw_phy1>;
+				status = "okay";
+			};
+
+			gsw_port2: port@2 {
+				reg = <2>;
+				label = "lan2";
+				phy-mode = "internal";
+				phy-handle = <&gsw_phy2>;
+				status = "okay";
+			};
+
+			gsw_port3: port@3 {
+				reg = <3>;
+				label = "lan3";
+				phy-mode = "internal";
+				phy-handle = <&gsw_phy3>;
+				status = "okay";
+			};
+
+			gsw_port4: port@4 {
+				reg = <4>;
+				label = "lan4";
+				phy-mode = "internal";
+				phy-handle = <&gsw_phy4>;
+				status = "okay";
+			};
+
+			/* port 6 = CPU port, connected to MAC GDM1 */
+			port@6 {
+				reg = <6>;
+				ethernet = <&gdm1>;
+				phy-mode = "internal";
+
+				fixed-link {
+					speed = <10000>;
+					full-duplex;
+					pause;
+				};
+			};
+		};
+
+		mdio: mdio {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			gsw_phy1: ethernet-phy@9 {
+				compatible = "ethernet-phy-ieee802.3-c22";
+				reg = <9>;
+			};
+
+			gsw_phy2: ethernet-phy@a {
+				compatible = "ethernet-phy-ieee802.3-c22";
+				reg = <10>;
+			};
+
+			gsw_phy3: ethernet-phy@b {
+				compatible = "ethernet-phy-ieee802.3-c22";
+				reg = <11>;
+			};
+
+			gsw_phy4: ethernet-phy@c {
+				compatible = "ethernet-phy-ieee802.3-c22";
+				reg = <12>;
+			};
+		};
+	};
 };
 
-&gpio0 {
-	status = "okay";
+/*
+ * QDMA DMA area. en7523.dtsi already has a reserved-memory node (5 regions for
+ * the NPU, 0x84000000-0x86E00000), so here we extend it by path overlay -- do NOT
+ * create a second reserved-memory node (dtc will report a duplicate node name).
+ *
+ * 0x87000000-0x8A000000 is inside the 512 MB DRAM, right after the dtsi NPU region.
+ * "no-map" => the kernel does not map this area; only the eth driver uses it as ring buffers.
+ */
+&{/reserved-memory} {
+	qdma0_buf: qdma0-buf@87000000 {
+		no-map;
+		reg = <0x87000000 0x02000000>;
+	};
+
+	qdma1_buf: qdma1-buf@89000000 {
+		no-map;
+		reg = <0x89000000 0x01000000>;
+	};
 };
 
-&gpio1 {
-	status = "okay";
+/*
+ * ------------------------------------------------------------------
+ * img16: drop the 2 old "GPIO banks", use the airoha,en7523-pinctrl driver
+ * ------------------------------------------------------------------
+ * The old banks (`airoha,en7523-gpio` declared in en7523.dtsi) map
+ * 0x1fbf0204/0200/0220/0214 + 0x1fbf0270/0260/0264/0278 -- they OVERLAP the
+ * 0x1fbf0200..0x1fbf02bf window of the pinctrl driver => the two drivers cannot
+ * coexist. The old nodes must go, exactly as in U-Boot patch
+ * 110-arm-dts-en7523-add-pinctrl-gpio-support-drop-legacy-.patch.
+ */
+/delete-node/ &gpio0;
+/delete-node/ &gpio1;
+
+/*
+ * (C1) `syscon_node_to_regmap()` only accepts a node with compatible "syscon"
+ * (drivers/mfd/syscon.c: device_node_get_regmap(np,
+ * of_device_is_compatible(np, "syscon"), true)); the `scu:` node of en7523.dtsi
+ * (`compatible = "airoha,en7523-scu"`) does NOT have it => add "syscon" here.
+ * This does not change clock driver behaviour: it matches the of_match_table
+ * entry "airoha,en7523-scu" (still first in the list), and the reg window
+ * 0x1fa20000+0x400 fully covers the IOMUX range 0x210..0x224.
+ */
+&scu {
+	compatible = "airoha,en7523-scu", "syscon";
 };
 
-/* MediaTek MT7916 Wi-Fi sits on PCIe (needs kmod-mt7915e + the firmware kmods). */
+/ {
+	system-controller@1fbf0200 {
+		compatible = "syscon", "simple-mfd";
+		/* >= 0x98 (irq_edge/level up to 0x94) and covers LAN_LED1_MAPPING 0x7c.
+		 * The vendor DT declares 0x80, which is TOO SMALL. */
+		reg = <0x1fbf0200 0xc0>;
+
+		en7523_pinctrl: pinctrl {
+			compatible = "airoha,en7523-pinctrl";
+
+			/*
+			 * (C2) MANDATORY. Without this phandle
+			 * syscon_regmap_lookup_by_compatible("airoha,en7523-chip-scu") returns NULL
+			 * (no DTS in the tree declares that compatible) => -ENODEV => probe bails out:
+			 * NO gpiochip, and every LED + button is lost. (U-Boot looks up the SCU a
+			 * different way, so the blueprint copied from the U-Boot patch misses this
+			 * line.)
+			 */
+			airoha,chip-scu = <&scu>;
+
+			/* platform_get_irq() runs BEFORE devm_gpiochip_add_data() =>
+			 * without these two lines the gpiochip is lost. GIC_SPI 26 is correct for the
+			 * whole EN7523/AN7581/AN7583 family. */
+			interrupt-parent = <&gic>;
+			interrupts = <GIC_SPI 26 IRQ_TYPE_LEVEL_HIGH>;
+
+			gpio-controller;
+			#gpio-cells = <2>;
+
+			interrupt-controller;
+			#interrupt-cells = <2>;
+
+			/* MANDATORY in practice:
+			 * airoha_convert_pin_to_reg_offset() uses
+			 * pinctrl_find_gpio_range_from_pin_nolock(); without a range => -EINVAL for
+			 * every set/get operation.
+			 * Row N <-> internal pin N+12 => <&en7523_pinctrl N> ==
+			 * <&en7523_pinctrl N>; the number 12 is NOT a row shift. */
+			gpio-ranges = <&en7523_pinctrl 0 12 30>;
+
+			/*
+			 * No pinctrl-0 is needed to "return the pads to GPIO": patch 203-02
+			 * writes 0 to 5 SCU IOMUX registers right in probe --
+			 * 0x0210 2ND_I2C_MODE, 0x0214 SPI_CS1_MODE, 0x0218 PON_MODE,
+			 * 0x0220 NPU_UART_EN, 0x0224 FORCE_GPIO_EN (EN7523: 0 = GPIO)
+			 * -- BEFORE the gpiochip is registered. Those are exactly the bits
+			 * holding gpio1/3/11/26.
+			 * WARNING: for gpio0..27 there is NO `function = "gpio"`: gpio_groups[]
+			 * only declares gpio28/gpio29. Never use `"pwm"` to
+			 * "return to GPIO" -- it SETS the PWM bit.
+			 * WARNING: REG_GPIO_FLASH_MODE_CFG 0x1fbf0234 / _EXT 0x1fbf0268
+			 * are NOT cleared; if a pad is still dead, read those two registers.
+			 */
+		};
+	};
+};
+
+/*
+ * ------------------------------------------------------------------
+ * Front-panel LEDs + buttons (M4.5) -- GPIO numbers MEASURED on real hardware
+ * ------------------------------------------------------------------
+ * The vendor table `userfs/7523duled.conf` does NOT match this board (see docs section
+ * 25.19.11-25.19.13): many pads the vendor marks as LEDs have no LED on this unit, so
+ * the numbers below are MEASURED RESULTS, not derived from the vendor table.
+ *
+ * Measurement method: drive each pad low while all other pads are high, then read
+ * back the `data[]` register (0x1fbf0204) to be sure the pad really changed level.
+ *
+ *   pad 27 -> PWR (blue)   OK: lit right after boot because bit27 of `data[]`
+ *                              defaults to 0 -- this is NOT any driver, so
+ *                              `default-state = "on"` is required to keep it.
+ *   pad 1  -> INT (case prints INET, blue) OK
+ *   pad 10 -> PON (green)     OK
+ *   pad 6  -> LOS (case prints ALM)  OK  (img15/img16 used pad 6 = WLAN 2.4G: WRONG)
+ *   pad 11 -> NO LED (vendor table says PWR) -- this is the root cause of the
+ *            "POWER cannot be controlled" bug in img15/img16: the DTS drove
+ *            pad 11 while pad 11 is dead.
+ *   pad 3, 26 -> NO LED (vendor table says LOS, WPS)
+ *   pad 2,4,5,8,9,12..21,28,29 -> NO LED
+ *   pad 22..25 -> switch LED pads: muxed to the switch LED engine, so driving
+ *            them as GPIO has no effect (the 4 LAN1-4 LEDs still work normally)
+ *
+ * WARNING: gpio29 = `pcie_reset1` (the vendor table calls it the Internet LED): pulling
+ *   it low resets PCIe => WiFi is lost. Do NOT declare an LED for it, do not test it.
+ *
+ * LAN1-4: driven by the switch LED engine (SCU 0x1fa20210 bits 3/5/7/9 =
+ *   LAN0..3_LED0_MODE = 1) => not declared in the DTS and not controllable via
+ *   GPIO.
+ * 2.4G / 5G: driven by the WiFi module -- `/sys/class/leds/mt76-phy0` and
+ *   `mt76-phy1` already exist; they are not SoC GPIOs.
+ * WPS: no controllable pad was found (all 28 safe pads were tried, plus holding
+ *   the button) => no LED node is declared. The WPS button on gpio7 still works.
+ *
+ * #gpio-cells = <2> => the polarity GPIO_ACTIVE_LOW is always given.
+ * &en7523_pinctrl N == &gpio0 N (internal pin = N + 12).
+ */
+/ {
+	leds {
+		compatible = "gpio-leds";
+
+		led_power: led-power {
+			function = LED_FUNCTION_POWER;
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&en7523_pinctrl 27 GPIO_ACTIVE_LOW>;
+			default-state = "on";	/* bit27 defaults to 0 => "on" is required to keep PWR lit as in stock */
+		};
+
+		led_pon: led-pon {
+			function = "pon";
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&en7523_pinctrl 10 GPIO_ACTIVE_LOW>;	/* measured on real hardware */
+		};
+
+		led_los: led-los {
+			function = "los";
+			color = <LED_COLOR_ID_RED>;
+			gpios = <&en7523_pinctrl 6 GPIO_ACTIVE_LOW>;	/* measured on real hardware: pad 6 = LOS/ALM */
+		};
+
+		led_inet: led-inet {
+			function = "inet";
+			color = <LED_COLOR_ID_BLUE>;
+			gpios = <&en7523_pinctrl 1 GPIO_ACTIVE_LOW>;	/* measured on real hardware: pad 1 = INET */
+		};
+	};
+
+	/*
+	 * img16: the `airoha,en7523-pinctrl` node DOES have interrupt-controller (GIC SPI 26),
+	 * so it now qualifies for switching to `gpio-keys` with real interrupts. This load
+	 * still keeps `gpio-keys-polled` so that only ONE variable (pinctrl) changes -- the
+	 * 100 ms poll runs fine; switching would need `interrupts` on every child node and
+	 * a re-check of the binding first.
+	 */
+	keys {
+		compatible = "gpio-keys-polled";
+		poll-interval = <100>;
+
+		key-reset {
+			label = "reset";
+			linux,code = <KEY_RESTART>;
+			gpios = <&en7523_pinctrl 0 GPIO_ACTIVE_LOW>;	/* proven: log shows pressed/released + reboot */
+		};
+
+		key-wps {
+			label = "wps";
+			linux,code = <KEY_WPS_BUTTON>;
+			gpios = <&en7523_pinctrl 7 GPIO_ACTIVE_LOW>;	/* dead pad before img16: holding it for 30 s did nothing */
+		};
+	};
+};
+
+/* WiFi MediaTek MT7916 sits on PCIe (kmod-mt7915e + kmod-mt7916-firmware) */
 &pcie0 {
 	status = "okay";
 };
@@ -60,12 +438,9 @@
 };
 
 /*
- * SPI-NAND partition table -- exactly as reported by `cat /proc/mtd` on real
- * hardware.
- *
- * DO NOT WRITE to tclinux (slot A), config, reservearea, or the trailing raw
- * region (0x6900000-0x8000000) which holds the factory block (GPON identity +
- * laser BOB calibration) and the bad-block table. See docs/hardware.md.
+ * NAND partition table -- EXACTLY per `cat /proc/mtd` on real hardware (2026-10-01).
+ * NEVER write to tclinux (slot A), config, reservearea or the raw area at the end of
+ * flash (0x6900000-0x8000000 holds the factory/GPON serial + BOB laser + BMT).
  */
 &nand {
 	partitions {
@@ -86,18 +461,31 @@
 		};
 
 		partition@c0000 {
-			label = "tclinux";		/* slot A -- stock firmware, never written */
+			label = "tclinux";		/* slot A -- stock, do not write */
 			reg = <0x00C0000 0x2800000>;
 			read-only;
 		};
 
 		partition@28c0000 {
-			label = "tclinux_slave";	/* slot B -- where OpenWrt is written */
+			label = "tclinux_slave";	/* slot B -- where OpenWrt firmware is written */
 			reg = <0x28C0000 0x2800000>;
+			/*
+			 * The target airoha sysupgrade image is FIT + squashfs:
+			 *   offset 0x000000  FIT (kernel lzma)   totalsize ~0x3831AC
+			 *   offset 0x3A0000  squashfs "hsqs"
+			 * Declare "denx,fit" so CONFIG_MTD_SPLIT_FIT_FW splits it into
+			 *   kernel / rootfs / rootfs_data  (see docs/booting.md, section 4.1)
+			 * After the split the mtd indices shift (measured, /proc/mtd has 10 partitions):
+			 *   mtd4 = kernel, mtd5 = rootfs, mtd6 = rootfs_data,
+			 *   mtd7 = data,   mtd8 = config, mtd9 = reservearea.
+			 * The running overlay is UBI on mtd7 (data) -- OUTSIDE slot B, so
+			 * sysupgrade (which erases mtd3) does not destroy the overlay.
+			 */
+			compatible = "denx,fit";
 		};
 
 		partition@50c0000 {
-			label = "data";			/* writable -- intended as the overlay */
+			label = "data";			/* originally JFFS2 -> now UBI (overlay) */
 			reg = <0x50C0000 0x1400000>;
 		};
 
@@ -108,19 +496,17 @@
 		};
 
 		partition@66c0000 {
-			label = "reservearea";		/* empty (all 0xFF) but still keep it read-only */
+			label = "reservearea";		/* empty (all 0xFF) but kept read-only */
 			reg = <0x66C0000 0x0240000>;
 			read-only;
 		};
 
 		/*
-		 * 0x6900000-0x8000000 (23 MiB) is the vendor's raw area and belongs
-		 * to no mtd partition:
-		 *   0x6F00000  factory block: GPON identity + laser BOB calibration
-		 *   0x6FC0000  a single byte, value '1' (purpose unknown)
-		 *   0x75E0000  'RAWB' marker
-		 *   0x7FE0000  'BMT' (bad-block table)
-		 * It is intentionally left undeclared and unwritten.
+		 * 0x6900000-0x8000000 (23 MB) = vendor raw area, not part of any mtd:
+		 *   0x6F00000 factory block (GPON serial @+0x2BC, BOB laser @+0x497)
+		 *   0x6FC0000 byte '1' (meaning unknown)
+		 *   0x75E0000 'RAWB', 0x7FE0000 'BMT'
+		 * -> no partition declared, never written. To read it, use mtd raw or leave it for later.
 		 */
 	};
 };

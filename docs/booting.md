@@ -305,7 +305,7 @@ holds), the Linux getty one does not.
 3. **For a quick OpenWrt root shell**, run the recorded tool:
 
    ```
-   python temp\42X6\ub_uart.py boot-shell
+   python tools/ub_uart.py boot-shell
    ```
 
    It grabs the U-Boot prompt, logs in, sets `bootargs` (with `rdinit=/bin/sh`), does the
@@ -316,7 +316,7 @@ holds), the Linux getty one does not.
    `/etc/modules.d/` (which prevents the Wi-Fi driver panic) and then `exec /sbin/init`:
 
    ```
-   python temp\42X6\ub_uart.py init
+   python tools/ub_uart.py init
    ```
 
    Alternatively boot without `rdinit=/bin/sh` and press Enter at
@@ -327,8 +327,8 @@ holds), the Linux getty one does not.
    later `send` invocation talks to the shell that is still alive -- no reboot needed:
 
    ```
-   python temp\42X6\ub_uart.py send --cmd "ls /proc/mtd"
-   python temp\42X6\ub_uart.py send --file temp\42X6\cmds_x.txt
+   python tools/ub_uart.py send --cmd "ls /proc/mtd"
+   python tools/ub_uart.py send --file <your-command-list.txt>
    ```
 
 6. **Vendor Linux only:** telnet `23` / SSH `62222` could be turned on by a web POST that sets
@@ -432,7 +432,7 @@ Wi-Fi-fix image). See the flagged conflict in section 9.
 8. One-shot alternative. The whole of steps 2-7 is implemented by:
 
    ```
-   python temp\42X6\ub_uart.py boot-shell
+   python tools/ub_uart.py boot-shell
    ```
 
    Useful flags: `--port` (default `COM23`), `--wait` (seconds to wait for the U-Boot prompt,
@@ -478,10 +478,10 @@ eliminate almost every conventional transfer path.
 
 | Route | Available? | Why |
 |---|---|---|
-| `/dev/mtdN`, `/dev/mtdblockN` | **no** | `/proc/mtd` lists the partitions, but the kernel was built without `CONFIG_MTD_CHAR` / `CONFIG_MTD_BLOCK` and ships no `mtd*.ko` |
+| `/dev/mtdN`, `/dev/mtdblockN` | **no** | `/proc/mtd` lists the partitions, but this early image has no devtmpfs and no `CONFIG_MTD_BLOCK`, and it ships no `mtd*.ko` -- see [sysupgrade.md](sysupgrade.md) |
 | `/dev/mem` | **no** | `CONFIG_DEVMEM` is off, so you cannot read RAM that U-Boot `loady` left behind |
 | `/proc/kcore` | **no** | `CONFIG_PROC_KCORE` is off |
-| network (eth / Wi-Fi / PON) | **no** | no driver runs in this image (Wi-Fi only after the PCIe quirk image; Ethernet has no EN7523 driver at all) |
+| network (eth / Wi-Fi / PON) | **no** | no driver runs in this image (this is the stage-1 image, before the PCIe quirk and before the Ethernet patch series) |
 | `base64`, `uudecode`, `xxd`, `od` | **no** | busybox has none of them; only `hexdump` exists, and it is read-only |
 | shell `printf` builtin | **yes** | the only usable route into the running system |
 | U-Boot `loady` (YMODEM) over UART | **yes** | slow but reliable; the only route for a whole image |
@@ -490,10 +490,10 @@ eliminate almost every conventional transfer path.
 
 Two more consequences worth stating plainly:
 
-* `sysupgrade` **cannot work** on an image built without `CONFIG_MTD_BLOCK` -- this is a real
-  defect of the current image, not just a debugging inconvenience. The fix list is
-  `CONFIG_MTD_BLOCK`, `CONFIG_MTD_CHAR`, `CONFIG_MTD_CMDLINE_PARTS`, plus the busybox `base64`
-  applet (and `CONFIG_DEVMEM` / `CONFIG_PROC_KCORE` if you want them for diagnostics).
+* `sysupgrade` **cannot work** on this stage-1 image -- it has neither devtmpfs nor
+  `CONFIG_MTD_BLOCK`, so there is nothing under `/dev/mtd*` to write through. Both are fixed
+  in the current board support; the analysis, including why `CONFIG_MTD_CHAR` is not a real
+  symbol on 6.18, is in [sysupgrade.md](sysupgrade.md).
 * Because no MTD block device exists, a file pushed into flash with `ub_push.py` cannot be read
   back from that same running Linux. `ub_push.py` is for staging data that a later boot or
   another image will consume -- not for handing a file to the live initramfs.
@@ -538,7 +538,7 @@ image will consume them).
 into the *running* Linux. Use it for small things: a `.ko` module, a firmware blob, a script.
 
 ```
-python temp\42X6\ub_paste.py --file temp\42X6\ringwatch.ko --rate 2500
+python tools/ub_paste.py --file ringwatch.ko --rate 2500
 ```
 
 It emits one shell line per 100 input bytes:
@@ -843,13 +843,14 @@ Repo artifacts referenced above: `openwrt/patches/0001-target-airoha-image-fix-e
    **vendor 11-partition `/proc/mtd`** table (where slot B is mtd7 and mtd3 is slot A's rootfs).
    The `dd ... skip=32768` line the tool prints matches the 16 MiB offset inside slot B, so the
    intended device is `tclinux_slave`; override `--mtd 7` when reading from the vendor firmware.
-6. **`mknod` for MTD devices is unverified.** One session recommends creating
+6. **`mknod` for MTD devices.** One session recommends creating
    `mknod /dev/mtd3 c 90 3` and `mknod /dev/mtdblock3 b 31 3` in the `rdinit=/bin/sh` shell and
-   reports that `dd` on the char device returns 0 bytes when `skip>0` (so `/dev/mtdblockN` must be
-   used); a later session states the initramfs kernel has neither `CONFIG_MTD_CHAR` nor
-   `CONFIG_MTD_BLOCK` and no `mtd*.ko`, so `/dev/mtd*` cannot work at all. The two observations
-   cannot both be true of the same image. Until `CONFIG_MTD_BLOCK`/`CONFIG_MTD_CHAR` are enabled,
-   assume no MTD device nodes are usable (section 5.1).
+   reports that `dd` on the char device returns 0 bytes when `skip>0` -- correct, a char MTD
+   device is not seekable, which is what `/dev/mtdblockN` is for. A later session concluded the
+   image had neither `CONFIG_MTD_CHAR` nor `CONFIG_MTD_BLOCK`; the first half of that is wrong
+   (there is no `CONFIG_MTD_CHAR` symbol on 6.18, the char devices are always built) and the
+   missing node was really devtmpfs. Both halves are now explained in
+   [sysupgrade.md](sysupgrade.md), and a current build does expose `/dev/mtd*`.
 7. **`echo b > /proc/sysrq-trigger` is not verified on OpenWrt** (section 7.2). The notes only
    establish that the vendor firmware lacks `/proc/sysrq-trigger` and that its `reboot` is a
    no-op.

@@ -1,7 +1,7 @@
 diff --git a/target/linux/airoha/image/en7523.mk b/target/linux/airoha/image/en7523.mk
 --- a/target/linux/airoha/image/en7523.mk
 +++ b/target/linux/airoha/image/en7523.mk
-@@ -8,3 +8,25 @@
+@@ -8,3 +8,29 @@
    DEVICE_DTS := en7523-evb
  endef
  TARGET_DEVICES += airoha_en7523-evb
@@ -9,8 +9,10 @@ diff --git a/target/linux/airoha/image/en7523.mk b/target/linux/airoha/image/en7
 +# ---------------------------------------------------------------------------
 +# Econet / vG vGP-42X6V1 -- GPON ONU on Airoha EN7523 (EN7529CT)
 +#
-+# Stage 1 board support: UART console, SPI-NAND partition map, PCIe Wi-Fi.
-+# xPON / optical nodes are intentionally absent -- see openwrt/pon/.
++# Board support: UART console, SPI-NAND partition map, PCIe MT7916 Wi-Fi, the
++# internal 4x GbE switch (DSA, MT7530 in MMIO mode) and the front-panel LEDs
++# and buttons.  xPON / optical nodes are intentionally absent -- see
++# openwrt/pon/ and docs/pon-port.md.
 +#
 +# Device/Default already builds a FIT kernel suitable for UART/YMODEM RAM-boot,
 +# but its load address must match the kernel's physical _text (0x80208000).
@@ -24,6 +26,8 @@ diff --git a/target/linux/airoha/image/en7523.mk b/target/linux/airoha/image/en7
 +  DEVICE_VENDOR := Econet
 +  DEVICE_MODEL := vGP-42X6V1
 +  DEVICE_DTS := en7523-vgp42x6v1
-+  DEVICE_PACKAGES := kmod-mt7915e kmod-mt7915-firmware kmod-mt7916-firmware
++  SUPPORTED_DEVICES += econet,vgp-42x6v1
++  DEVICE_PACKAGES := kmod-mt7915e kmod-mt7915-firmware kmod-mt7916-firmware \
++	kmod-gpio-button-hotplug kmod-leds-gpio
 +endef
 +TARGET_DEVICES += econet_vgp-42x6v1

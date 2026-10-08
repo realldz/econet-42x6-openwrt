@@ -1,7 +1,7 @@
 diff --git a/target/linux/airoha/en7523/config-6.18 b/target/linux/airoha/en7523/config-6.18
 --- a/target/linux/airoha/en7523/config-6.18
 +++ b/target/linux/airoha/en7523/config-6.18
-@@ -317,3 +317,21 @@
+@@ -317,3 +317,43 @@
  CONFIG_ZSTD_COMMON=y
  CONFIG_ZSTD_COMPRESS=y
  CONFIG_ZSTD_DECOMPRESS=y
@@ -12,14 +12,36 @@ diff --git a/target/linux/airoha/en7523/config-6.18 b/target/linux/airoha/en7523
 +# JFFS2             writable filesystem for the "data" overlay partition
 +# MTD_CMDLINE_PARTS keep cmdline partition parsing available
 +# SQUASHFS_XZ       xz-compressed read-only rootfs
-+#
-+# MTD_BLOCK / MTD_CHAR are NOT set by the stock en7523 config, which leaves the
-+# initramfs without /dev/mtd*; that blocks flashing from Linux and the
-+# sysupgrade path.  See docs/roadmap.md.
++# MTD_BLOCK         /dev/mtdblockN, needed to mount the squashfs rootfs and the
++#                   overlay.  The char devices (/dev/mtdN) are built into
++#                   CONFIG_MTD unconditionally on 6.18: mtdchar.o is part of
++#                   mtd-y and the old CONFIG_MTD_CHAR symbol no longer exists.
++#                   Neither node appears unless devtmpfs is on, and that is an
++#                   OpenWrt .config symbol, seeded by scripts/build-firmware.sh.
++#                   See docs/sysupgrade.md.
++# NET_DSA*          the four GbE ports hang off the internal MediaTek MT7530
++#                   switch, driven in MMIO mode (there is no MDIO bus on this
++#                   board).  See docs/ethernet.md.
 +# ---------------------------------------------------------------------------
 +CONFIG_JFFS2_FS=y
 +CONFIG_JFFS2_FS_DEBUG=0
 +CONFIG_MTD_CMDLINE_PARTS=y
 +CONFIG_SQUASHFS_XZ=y
 +CONFIG_MTD_BLOCK=y
-+CONFIG_MTD_CHAR=y
++CONFIG_NET_DSA=y
++CONFIG_NET_DSA_TAG_MTK=y
++CONFIG_NET_DSA_MT7530=y
++# CONFIG_NET_DSA_MT7530_MDIO is not set
++CONFIG_NET_DSA_MT7530_MMIO=y
++CONFIG_MEDIATEK_GE_SOC_PHY=y
++# CONFIG_PCS_AIROHA_EN7523 is not set
++#
++# --- interactive-prompt guard ----------------------------------------------
++# The symbols below have a prompt but no default value, so a non-interactive
++# kernel syncconfig aborts with "Error 1" unless the config names a value for
++# each of them.  Say "is not set" explicitly.
++# CONFIG_LD_DEAD_CODE_DATA_ELIMINATION is not set
++# CONFIG_AIROHA_THERMAL is not set
++# CONFIG_PHY_AIROHA_AN7583_PCIE is not set
++# CONFIG_PHY_AIROHA_USB is not set
++# CONFIG_PHY_AIROHA_AN7583_USB is not set

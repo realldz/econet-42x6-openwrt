@@ -1,10 +1,15 @@
 #!/bin/sh
 # First-boot defaults for the vGP-42X6V1 image.
 #
-# Deliberately minimal.  There is no Ethernet driver for this SoC variant yet,
-# and the Wi-Fi PHY numbering is not stable across boots, so generating a
-# network/wireless config here would be guesswork.  Configure wireless by hand
-# for now (`wifi config`, then edit /etc/config/wireless).
+# Deliberately minimal.  The board generates its own /etc/config/network from
+# the device tree (board.d/02_network gives br-lan the four switch ports) and its
+# own /etc/config/wireless through the wifi-detect hotplug script, with the
+# wireless interfaces disabled until an operator enables them.  Pinning either
+# of them here would only fight that machinery.
+#
+# If you want a pinned wireless configuration instead, drop
+# openwrt/optional-configs/etc-config-wireless.example into
+# files/etc/config/wireless next to this script and edit its placeholders.
 
 uci -q batch <<-EOF
 	set system.@system[0].hostname='42x6'

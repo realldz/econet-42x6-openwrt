@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 /*
- * vGP-42X6V1 -- stage 2 PON overlay, included from en7523-vgp42x6v1.dts:
+ * vGP-42X6V1 -- PON overlay (stage 2), included from en7523-vgp42x6v1.dts:
  *
  *     #include "en7523-vgp42x6v1-pon.dtsi"
  *
- * Include this ONLY after the PON kernel patches (openwrt/pon/apply-pon.sh) are
- * applied AND the xPON hooks have been ported into airoha_eth.c. Otherwise the
- * device tree fails to compile, because the bindings and drivers are absent.
+ * Only include this after applying the PON patches (pon/apply-pon.sh) and after porting
+ * the xPON hook into airoha_eth.c, otherwise the DTS fails to compile (no bindings/driver).
  *
- * Addresses come from the stock device tree and from live hardware:
- *   xpon@1fb64000       reg 0x1fb64000+0x3e8, 0x1fb66000+0x23c  IRQ 42 (mac) + 34 (dying-gasp)
- *   pon_phy@1faf0000    reg 0x1faf0000+0x800, 0x1fa2ff24+4,
- *                           0x1faf3000+0xfff, 0x1faf4000+0xfff  IRQ 43
+ * All figures come from the stock DT and the live state of the unit (see docs/econet/42X6_*):
+ *   xpon@1fb64000      reg 0x1fb64000+0x3e8, 0x1fb66000+0x23c   IRQ 42 (mac) + 34 (dying-gasp)
+ *   pon_phy@1faf0000   reg 0x1faf0000+0x800, 0x1fa2ff24+4,
+ *                         0x1faf3000+0xfff, 0x1faf4000+0xfff   IRQ 43
  *   pon_hsgmii@1fa65000 reg 0x1fa65100+0x4a0, 0x1fa65a00+0x1ac,
  *                           0x1fa65e00+0x64, 0x1fa66000+0xdc    IRQ 66
  */
 
-/* PON MAC -- matches the community tree's xmac@1fb60000, but keeps the 42X6
- * stock addresses. */
+/* PON MAC -- matches the community tree xmac@1fb60000 node, but keeps the stock 42X6 numbers */
 xpon: xmac@1fb60000 {
 	compatible = "airoha,en7523-xpon";
 	reg = <0x1fb60000 0x10000>,	/* GPON at +0x4000, EPON at +0x6000 */
@@ -29,32 +27,30 @@ xpon: xmac@1fb60000 {
 		     <GIC_SPI 34 IRQ_TYPE_LEVEL_HIGH>;	/* dying-gasp, stock 0x22 */
 	interrupt-names = "mac", "dying-gasp";
 
-	resets = <&scu EN7523_XPON_MAC_RST>;		/* bit 41 -- the define already exists in OpenWrt */
+	resets = <&scu EN7523_XPON_MAC_RST>;		/* bit 41 -- OpenWrt already has the define */
 	phys = <&xpon_phy>;
 	phy-names = "xpon";
 	airoha,scu = <&scu>;
-	ethernet = <&gdm2>;				/* requires the xPON hooks in airoha_eth.c */
+	ethernet = <&gdm2>;				/* needs the xPON hook in airoha_eth.c */
 	airoha,pon-mode = "gpon";			/* stock runs GPON (BOB profile 0x07) */
 
 	/*
-	 * GPON identity is PER UNIT and lives in the factory block of the SPI-NAND
-	 * (offset 0x6F00000), not in the device tree. The values below are
-	 * placeholders -- the intended design is to read them from the factory
-	 * partition at runtime:
-	 *   SerialNumber = <SERIAL>   VendorId = first 4 characters of the serial
-	 *   EquipmentId  = vGP-42X6V1 Version  = VGP42X6M001   Password  = empty
-	 * Do NOT use airoha,gpon-serial-from-mac: the serial suffix is not part of
-	 * the MAC address.
+	 * GPON identity of the unit (read live: tcapi show GPON + live romfile):
+	 *   SerialNumber = <unit serial>   VendorId = first 4 characters of the serial
+	 *   EquipmentId  = vGP-42X6V1     Version  = VGP42X6M001     Password = empty
+	 * Do NOT use airoha,gpon-serial-from-mac (the serial does not follow from the MAC).
+	 * The omci-serial-number / omci-vendor-id values below are PLACEHOLDERS: replace
+	 * them with the unit's own values (vendor id = first four characters of the serial).
 	 */
-	omci-serial-number = "<SERIAL>";
-	omci-vendor-id = "<VNDR>";
-	omci-version = "<VERSION>";
+	omci-serial-number = "XXXX00000000";
+	omci-vendor-id = "XXXX";
+	omci-version = "VGP42X6M001";
 	omci-equipment-id = "vGP-42X6V1";
 
 	status = "okay";
 };
 
-/* PON PHY (SerDes + PMA) -- stock has IRQ 43, the community tree omits it. */
+/* PON PHY (SerDes + PMA) -- stock has IRQ 43, the community version lacks it */
 &scu {
 	#reset-cells = <1>;
 };
@@ -72,25 +68,22 @@ xpon_phy: phy@1faf0000 {
 	resets = <&scu EN7523_XPON_PHY_RST>;		/* bit 0 */
 	airoha,scu = <&scu>;
 	#phy-cells = <0>;
-	/* Laser enable. GPIO number comes from the vendor led.conf (LED 42 -> gpio 16);
-	 * the polarity is NOT yet confirmed -- try both. */
-	tx-disable-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>;
+	tx-disable-gpios = <&gpio0 16 GPIO_ACTIVE_HIGH>; /* led.conf: LED 42 -> gpio 16 (both polarities were tried) */
 
 	/*
-	 * pinctrl: the community tree uses `pinctrl-0 = <&pon_pinctrl>` with a
-	 * system-controller@1fbf0200 node (syscon + simple-mfd) and a "pon" group.
-	 * OpenWrt's dts/en7523.dtsi has no such node, so pick one:
-	 *   (a) add the syscon+pinctrl node for EN7523 and a "pon" function in
-	 *       pinctrl-en7523.c
-	 *   (b) make pinctrl optional in phy-airoha-xpon.c
-	 * Until then the line stays commented out:
+	 * WARNING: pinctrl -- the community version uses `pinctrl-0 = <&pon_pinctrl>` with a
+	 * system-controller@1fbf0200 node (syscon+simple-mfd) + "pon" group.
+	 * OpenWrt dts/en7523.dtsi does NOT have that node, so pick one of:
+	 *   (a) add a syscon+pinctrl node for EN7523 + a "pon" function in pinctrl-en7523.c
+	 *   (b) keep pinctrl optional in phy-airoha-xpon.c
+	 * so the line below is left commented out for now:
 	 */
 	/* pinctrl-names = "default"; pinctrl-0 = <&pon_pinctrl>; */
 
 	status = "okay";
 };
 
-/* PON PCS -- stock has IRQ 66; the community tree declares no IRQ. */
+/* PON PCS -- stock has IRQ 66; the community version declares no IRQ */
 pon_pcs: pcs@1fa08000 {
 	compatible = "airoha,en7523-pcs";
 	reg = <0x1fa60000 0x1000>,
@@ -109,15 +102,12 @@ pon_pcs: pcs@1fa08000 {
 };
 
 /*
- * Laser / BOSA -- NOT RESOLVED YET:
- *  - live evidence: DDMI goes through the PON PHY block's internal I2C
- *    (/proc/pon_phy/debug -> phy_i2c_div_clock); there are no /dev/i2c-* nodes
- *    on the device.
- *  - the BOB blob has been extracted from the factory block: offset 0x6F00497,
- *    256 bytes, magic 0x07050701 (GPON + EN7571).
- * If the BOSA turns out to sit on the SoC's i2c0, uncomment the block below; if
- * it sits behind the PHY, attach the optical frontend to the PHY using the
- * community tree's binding instead.
+ * Laser / BOSA -- NOT SETTLED YET (see gap analysis section 4.7):
+ *  - live evidence: DDMI goes over the internal I2C of the PON PHY block
+ *    (`/proc/pon_phy/debug` -> `phy_i2c_div_clock`); no /dev/i2c-* on the unit.
+ *  - BOB already extracted: 0x6F00497, 256 B, magic 0x07050701 (GPON + EN7571).
+ *  If the BOSA is on the SoC i2c0, uncomment the block below; if it sits behind the
+ *  PHY, attach an optical frontend to the PHY per the community tree binding.
  */
 /*
 &i2c0 {

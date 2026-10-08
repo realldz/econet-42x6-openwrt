@@ -1,0 +1,58 @@
+--- a/mt7915/init.c
++++ b/mt7915/init.c
+@@ -610,6 +610,19 @@
+ 			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
+ 				       GENMASK(31, 28), 3);
+ 			break;
++		case 0x7906:
++			/* MT7916 PCIe: mt76_chip() returns the PCI device id (0x7906) here,
++			 * not 0x7916 (which is the SoC-integrated MT7916 on MT7986). The LED
++			 * pad function code on the discrete MT7916 is 4 (same as MT7915),
++			 * not 3 - measured on an Econet vGP-42X6V1 (EN7523 + MT7916,
++			 * PCI 14c3:7906): writing MUX1 = 0x44000000 lights both the 2.4G and
++			 * the 5G LED. See docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
++			 */
++			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
++				       GENMASK(27, 24), 4);
++			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
++				       GENMASK(31, 28), 4);
++			break;
+ 		default:
+ 			break;
+ 		}
+@@ -627,6 +640,17 @@
+ 			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
+ 				       GENMASK(31, 28), 3);
+ 			break;
++		case 0x7906:
++			/* MT7916 PCIe: mt76_chip() returns the PCI device id (0x7906) here,
++			 * not 0x7916 (which is the SoC-integrated MT7916 on MT7986). The LED
++			 * pad function code on the discrete MT7916 is 4 (same as MT7915),
++			 * not 3 - measured on an Econet vGP-42X6V1 (EN7523 + MT7916,
++			 * PCI 14c3:7906): writing MUX1 = 0x44000000 lights both the 2.4G and
++			 * the 5G LED. See docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
++			 */
++			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
++				       GENMASK(31, 28), 4);
++			break;
+ 		default:
+ 			break;
+ 		}
+@@ -643,6 +667,17 @@
+ 		case 0x7916:
+ 			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
+ 				       GENMASK(27, 24), 3);
++			break;
++		case 0x7906:
++			/* MT7916 PCIe: mt76_chip() returns the PCI device id (0x7906) here,
++			 * not 0x7916 (which is the SoC-integrated MT7916 on MT7986). The LED
++			 * pad function code on the discrete MT7916 is 4 (same as MT7915),
++			 * not 3 - measured on an Econet vGP-42X6V1 (EN7523 + MT7916,
++			 * PCI 14c3:7906): writing MUX1 = 0x44000000 lights both the 2.4G and
++			 * the 5G LED. See docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
++			 */
++			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
++				       GENMASK(27, 24), 4);
+ 			break;
+ 		default:
+ 			break;

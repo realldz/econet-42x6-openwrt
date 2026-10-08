@@ -32,6 +32,8 @@ workspace, not in this repository.
 | `temp/42X6/sh_axiw80.out`, `temp/42X6/sh_bme_test.out`, `temp/42X6/send_b3_clean.log` | `Unknown symbol` messages per module |
 | `docs/econet/42X6_openwrt_m1_status.md` | sections 10, 13, 14 and 15: PCIe diagnosis, module order, eeprom root cause |
 | `openwrt/patches/0004-package-mt76-install-default-eeprom-bins.patch` | the packaging fix, quoted verbatim in section 4 |
+| `docs/econet/42X6_openwrt_m4_ethernet.md` sections 22.7-22.8, 23.9, 25.23-25.24 | the on-air client test, the regulatory measurements, the package-feed survey, the eeprom/MAC work and the LED pads |
+| the project build tree (patched `mt76` package, board `files/` overlay) | the `mt7915/eeprom.h` offsets, the patched default blob, the mt76 LED patches |
 
 ## 1. What is on the PCIe bus
 
@@ -301,27 +303,77 @@ mt7915_wa.bin      mt7915_wm.bin           mt7916_eeprom.bin
 mt7916_rom_patch.bin  mt7916_wa.bin        mt7916_wm.bin
 ```
 
+### Why the MAC address was random, and the fix that removes it
+
+`mt7915_eeprom_load()` reads the chip's EFuse and fails on this board because the
+EFuse is blank -- that is the `eeprom load fail, use default bin` line, and it is
+expected. What follows from it is not: the **upstream** `mt7916_eeprom.bin` has
+`00:00:00:00:00:00` in both MAC slots, `is_valid_ether_addr()` rejects that, and
+the driver invents an address.
+
+```
+[  757.434455] mt7915e 0001:01:00.0: Invalid MAC address, using random address 02:00:00:00:00:00
+```
+
+(The address in that line is redacted here. The driver generates a fresh random
+one on every boot, so the interface does not keep an address across reboots.)
+
+The fix is to write the unit's own addresses into the two slots that
+`mt7915/eeprom.h` defines for them. The blob is 4096 bytes
+(`MT7916_EEPROM_SIZE`) and only 12 bytes of it change:
+
+| Offset | Field | Contents |
+|---|---|---|
+| `0x004` | `MT_EE_MAC_ADDR` | 6 bytes: the 2.4 GHz address |
+| `0x00a` | `MT_EE_MAC_ADDR2` | 6 bytes: the 5 GHz address |
+
+The values come from the unit, not from a table: the per-unit base MAC sits in the
+vendor's own provisioning data (the gzip `romfile` on mtd1, which the stock firmware
+also materialises as `/etc/mac.conf`) -- see [hardware.md](hardware.md) section 4.
+The wired interface already uses the base address, so Wi-Fi takes base + 1 for
+2.4 GHz and base + 2 for 5 GHz; with a placeholder base of `02:00:00:00:00:00` that
+is `02:00:00:00:00:01` and `02:00:00:00:00:02`.
+
+[`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py) does the edit: it
+writes the 2.4 GHz address at `0x004` and, by default, that address + 1 at `0x00a`
+(`--second` sets the 5 GHz slot explicitly, `--show` inspects a blob first). For this
+board the call is the base MAC + 1 with `--second` at base + 2. The result is
+installed as `/lib/firmware/mediatek/mt7916_eeprom.bin` -- in the image
+(`files/lib/firmware/mediatek/mt7916_eeprom.bin`, copied after the packages so it
+overrides the package's copy) or, for a no-flash test, in the running overlay
+followed by `wifi down`, `rmmod mt7915e`, `modprobe mt7915e`, `wifi up`. Either way
+the check is the same: no `Invalid MAC address` in `dmesg`, and `iw dev` showing the
+two expected addresses. `option macaddr` in a `wifi-iface` section only pins the
+AP/BSSID netdev address and does not silence the phy-level message, so it is a
+second lock, not the fix.
+
 ### A consequence that still stands: no per-unit calibration
 
-The default blob is a **generic template**. It is not this unit's calibration
-data, and it is not supposed to be. Two visible consequences:
+With the MAC slots filled in, the blob is still a **generic template** for
+everything else: it carries no per-unit RF calibration, so the radio transmits with
+generic calibration data. That is workable rather than ideal -- and it is what the
+vendor firmware does on this unit too, whose own default EEPROM has a MAC but no
+per-machine calibration.
 
-- There is no per-unit MAC address in it, so the driver invents one. The logs
-  show:
+The per-unit data does exist in the vendor's flash, in the factory block and the
+`romfile` ([hardware.md](hardware.md) section 4). Reading the radio calibration
+from there and feeding it to mt76 -- an nvmem / `mediatek,mtd-eeprom` reference in
+the device tree -- is still open; see section 8.
 
-  ```
-  [  757.434455] mt7915e 0001:01:00.0: Invalid MAC address, using random address 02:00:00:00:00:00
-  ```
+### Build-side notes for this area
 
-  (The address in that line is redacted here -- the log carries a
-  driver-generated random address, not a manufacturer address.)
-
-- There is no per-unit RF calibration, so the radio runs uncalibrated.
-
-The real calibration for this board lives in the `factory` partition. Reading it
-and pointing mt76 at it (via an nvmem / `mediatek,mtd-eeprom` reference in the
-device tree) is still an open item; see section 8. The default blob is a
-workaround that makes the driver probe, not a correct end state.
+- **Clean the package after editing its patches.** mt76 patches are applied in the
+  package `prepare` step, so a rebuild silently reuses the source tree prepared
+  earlier unless `make package/kernel/mt76/clean` runs first.
+- **The eeprom blobs come from a patch to the mt76 package Makefile**
+  (`openwrt/patches/0004-package-mt76-install-default-eeprom-bins.patch`); without
+  it the image has the firmware blobs but not the eeprom ones, and the blank-EFuse
+  fallback cannot complete.
+- **This target has no package feed.** The `airoha/en7523` target feed is not
+  published (its URL returns 404), and kernel modules are tied to the exact kernel
+  build anyway, so `apk add kmod-...` cannot add a driver here: it has to be in
+  `DEVICE_PACKAGES` at build time. The `arm_cortex-a7` `base`, `luci`, `routing`
+  and `telephony` feeds do exist, so userspace packages are unaffected.
 
 ## 5. What a working bring-up looks like
 
@@ -357,7 +409,9 @@ insmod=0
 `insmod=0` is the key line: the probe returned success. Note that
 `eeprom load fail, use default bin` is **expected** and is not an error on this
 board, because the EFuse really is blank. What must not appear is the
-`Direct firmware load ... failed` line after it.
+`Direct firmware load ... failed` line after it. The `Invalid MAC address` line in
+this log is the symptom that section 4 now removes: on this boot the address is
+driver-generated and will differ on the next one.
 
 The PHYs appear, and `wlan0` can then be created:
 
@@ -457,6 +511,7 @@ a sign of a failed probe.
 | `WA Firmware Version: DEV_000000, Build Time: 20240823172837` | WA firmware running |
 | `eeprom load fail, use default bin` | expected on this board (blank EFuse); the default blob is used |
 | `registering led 'mt76-phy0'` / `'mt76-phy1'` | the two PHYs registered |
+| no `Invalid MAC address, using random address` | the default blob carries the unit's own MAC (section 4). On an unpatched blob this line appears and the address changes on every boot |
 | no `Direct firmware load ... failed` | the eeprom blob is present |
 | no `probe with driver mt7915e failed` | the probe returned success |
 
@@ -487,10 +542,14 @@ radio sections from what is actually present. Note that the `| head -1` form in
 the log above is itself only a discovery shortcut, not a reliable ordering; it
 happened to pick `phy0` on that boot.
 
-Which index a given band gets is not documented by the sources either. The logs
-show `phy2`/`phy3` and `phy0`/`phy1` but do not record which of the pair is
-2.4 GHz and which is 5 GHz, so any band-to-PHY assumption should be checked on
-hardware rather than read off an index.
+Which index a given band gets is not fixed either. What *is* established on
+hardware is the band mapping of the two wiphys of the WF function: the generated
+configuration ends up with `radio0` = 2.4 GHz (`band '2g'`, HE20) and `radio1` =
+5 GHz (`band '5g'`, HE80 on channel 36), and OpenWrt pins each radio by PCI path
+rather than by index -- `path` is the WF function's own path for `radio0`, and the
+same path with a `+1` suffix for `radio1`. Both wiphys belong to the single WF
+function `14c3:7906`; the `+1` selects the second wiphy of that device. Use `path`,
+not `phyN`, anywhere a radio has to be named.
 
 ## 7. If Wi-Fi does not come up
 
@@ -539,6 +598,17 @@ Work through these in order. Each maps to one of the sections above.
    described in section 5: `ip link` shows only `lo` until
    `iw phy <phy> interface add wlan0 type managed` is run.
 
+6. **There is no `/etc/config/wireless` to begin with.** The image ships none on
+   purpose (section 11), so on first boot the file is generated by `wifi config`,
+   with both `wifi-iface` sections set to `disabled '1'` and the 5 GHz device
+   disabled as well. Zero ESSIDs and no `phyN-ap0` interfaces are then the expected
+   state, not a failure. Enable the radio in LuCI (Network -> Wireless) or with
+   `uci`, then `wifi reload`.
+
+7. **The kmod you want is not installable.** Because this target has no package
+   feed (section 4, build-side notes), a missing driver cannot be added with `apk`;
+   it has to be in `DEVICE_PACKAGES` and baked into the image.
+
 ## 8. Where the evidence is thin or open
 
 These are stated plainly rather than glossed over.
@@ -566,16 +636,106 @@ These are stated plainly rather than glossed over.
   the working `insmod` sequences; the specific reason (no dependency file) is
   the standard OpenWrt explanation and is not proven by a captured listing here.
 
-- **Which PHY is which band is not recorded.** The logs establish that the
-  driver registers two PHYs and that their indices vary, but not the mapping
-  from `phyN` to 2.4 GHz or 5 GHz for either boot.
+- **Which `phyN` is which band is still not fixed by the driver.** The band mapping
+  is now known for the generated configuration (`radio0` = 2.4 GHz, `radio1` =
+  5 GHz, pinned by PCI `path` -- section 6), but the enumeration order of the two
+  wiphys is not guaranteed by anything in the sources.
 
-- **The real calibration path is not resolved.** The `factory` partition has
-  been located, but no run in these sources reads calibration from it or feeds
-  it to mt76. Until that happens, the MAC address is random and the radio is
-  uncalibrated. This is an open item, not a solved one.
+- **The real calibration path is still not resolved.** The vendor data has been
+  located (the factory block and the `romfile`; [hardware.md](hardware.md) section
+  4), but no run reads per-unit radio calibration from it or feeds it to mt76. The
+  driver uses the generic default blob with the unit's MAC written into it: that
+  ends the random address, it does not make the radio per-unit calibrated.
 
-- **Data-path behaviour is untested.** The evidence stops at the interface being
-  up at 20.00 dBm. Nothing in these sources shows a scan, an association, or a
-  packet actually crossing the radio, so "works" here means "probe succeeds and
-  the interface comes up", not "passes traffic".
+- **No measured throughput.** A real client associated over the air on 5 GHz and
+  moved roughly 300 MB (section 10), but the rate figures available are the
+  driver's own estimates -- there was no iperf3 peer -- so there is no measured
+  throughput number for this board.
+
+## 9. Regulatory settings and transmit power
+
+The regulatory domain is **global** to the wireless stack: `hostapd` pushes the country it is handed
+into the kernel, and it then applies to every radio. Measured:
+
+| Setting | Result |
+|---|---|
+| no `country` at all | the driver uses the eeprom ceilings: 29 dBm on 2.4 GHz, 23 dBm on 5 GHz |
+| `country 'US'` on one radio | the whole stack becomes US: 2.4 GHz may go to 30 dBm and the driver targets 29 dBm -- above the 200 mW (23 dBm) limit that applies here |
+| `country 'VN'` on both + `txpower 20` | 20.00 dBm on both radios |
+
+`wireless-regdb` 2026.05.30 lists VN as `(2400 - 2483.5 @ 40), (200 mW)` and
+`(5150 - 5250 @ 80), (200 mW), NO-OUTDOOR, AUTO-BW`. There is no `NO-IR` flag, so a 5 GHz AP on
+channel 36 is legal -- an earlier note in the workspace that VN forbade 5 GHz was wrong. Verified
+working combination: `country 'VN'` on **both** radios, 2.4 GHz in HE20, 5 GHz in HE80 on channel 36,
+`txpower 20` on both (`txpower` is at the connector, the regulatory limit is on EIRP, and the generic
+eeprom carries no board gain data, so 20 dBm is the conservative measured value). One consequence of
+the packaging policy in section 11: the shipped image pins no country, so until one is set the
+2.4 GHz radio uses the 29 dBm eeprom ceiling. Set `country 'VN'` before putting the unit on the air.
+
+## 10. Acceptance with a real client (5 GHz)
+
+The claim that matters is "packets cross the air", not "the interface comes up". Tested with a stock
+Android phone associating to the 5 GHz AP; the client's addresses are not reproduced:
+
+```text
+iw dev phy1-ap0 station dump
+	authorized: yes   authenticated: yes   associated: yes
+	signal: -76 dBm   signal avg: -77 dBm
+	tx bitrate: 864.8 MBit/s HE-MCS 8 HE-NSS 2 HE-GI 0 HE-DCM 0
+	rx bitrate: 720.6 MBit/s HE-MCS 7
+	connected time: 250 s
+	rx bytes: 146399410   tx bytes: 159392382
+```
+
+Association at HE-MCS8, 80 MHz, 2 spatial streams on channel 36, with about 300 MB moved in each
+direction -- real traffic, not beacons. The board answered `ping` from the client (2/2, 2.9-4.6 ms),
+and a **wired** host pinging the client got **10/10 replies at 3-4 ms, 0 % loss** with a resolved ARP
+entry, so the path was host -> cable -> switch port -> `br-lan` -> `phy1-ap0` -> air -> client. That
+hop is what proves the radio path end to end. Two caveats: the 864.8 MBit/s figure is the driver's
+rate estimate, not a measured throughput (there was no iperf3 peer), and the AP was seen advertising
+160 MHz while the VN entry allows 80 MHz in that band -- the link worked, but pinning `htmode HE80`
+is the safer configuration until that is understood.
+
+## 11. Default configuration policy
+
+The project deliberately ships **no** `/etc/config/wireless`, so on first boot OpenWrt generates it
+exactly as it does for any other board (upstream ships none for this target either). The result is
+stock behaviour: both `wifi-iface` sections `disabled '1'`, the 5 GHz device disabled as well,
+`ssid 'OpenWrt'`, `encryption 'none'`, and **no** `country`, `txpower` or `macaddr` pinned. Nothing
+belonging to the ISP this unit came from is in the image: that provisioning exists only as an
+**optional template**, applied when the board support is installed with the custom wireless file
+enabled.
+
+Enable Wi-Fi in LuCI (Network -> Wireless -> Edit, set the SSID and the encryption, Save & Apply), or
+by hand:
+
+```sh
+wifi config                                   # regenerate it if it is missing
+uci set wireless.default_radio0.disabled='0'
+uci set wireless.radio1.disabled='0'           # the 5 GHz device is disabled by default
+uci set wireless.default_radio1.disabled='0'
+uci set wireless.radio0.country='VN'           # see section 9
+uci set wireless.radio1.country='VN'
+uci commit wireless
+wifi reload
+```
+
+`wifi reload` re-runs the whole reconfigure path -- interfaces down, radio restart, interfaces up --
+and that is the interesting case for the front-panel LEDs, because the LED state follows the radio
+and a driver that only writes it at probe time falls out of step. See [docs/leds.md](leds.md).
+
+## 12. The 2.4/5 GHz front-panel LEDs
+
+The two WLAN LEDs are **not** SoC GPIOs: they hang off the MT7916's own LED pads, which mt76 drives
+through a pad-mux register (`MT_LED_GPIO_MUX1`, `0x70005054`) -- pad 14 = 2.4 GHz and pad 15 = 5 GHz
+in the low and high halves of the register, function code `4` = on and `0` = off. The on-chip LED
+block itself is inert on this board.
+
+Upstream mt76 leaves those pads unmapped for this chip: `mt7915_init_led_mux()` switches on the PCI
+device id and has no `0x7906` branch, so the LED block is enabled but nothing is muxed to a pad. Three
+board patches fix it: `100-mt7916-pcie-led-mux.patch` adds the `0x7906` branch,
+`101-mt7916-led-mux-control.patch` maps the LED classdev brightness onto the pad mux, and
+`102-mt7916-led-follow-radio.patch` makes the pads follow radio start/stop, so a disabled radio means
+dark LEDs. Behaviour: radio off -> off, radio on and idle -> solid, traffic -> blinking (the blink is
+mac80211's throughput trigger, `phy0tpt`/`phy1tpt`, which the driver already binds). The register
+map, the measurement that identified the pads and the full history are in [docs/leds.md](leds.md).

@@ -1,0 +1,109 @@
+--- a/mt7915/init.c
++++ b/mt7915/init.c
+@@ -312,7 +312,11 @@
+  *    phan mem (xem cho gan callback: khong gan blink_set cho 0x7906).
+  * Xem docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
+  */
+-static void mt7915_led_mux_set(struct led_classdev *led_cdev, bool on)
++/* patch 102: goi ca tu mt7915/main.c (khai bao truoc de qua -Wmissing-prototypes) */
++void mt7915_led_mux_set(struct led_classdev *led_cdev, bool on);
++
++/* dung chung voi mt7915/main.c (patch 102) */
++void mt7915_led_mux_set(struct led_classdev *led_cdev, bool on)
+ {
+ 	struct mt76_phy *mphy = container_of(led_cdev, struct mt76_phy, leds.cdev);
+ 	struct mt7915_dev *dev = container_of(mphy->dev, struct mt7915_dev, mt76);
+@@ -646,7 +650,9 @@
+ 				       GENMASK(31, 28), 3);
+ 			break;
+ 		case 0x7906:
+-			/* MT7916 PCIe: mt76_chip() returns the PCI device id (0x7906) here,
++			/* MT7916 PCIe: ma 0 = TAT. Luc init KHONG duoc bat san -
++			 * den chi sang khi radio that su chay (patch 102, mt7915/main.c).
++			 * mt76_chip() returns the PCI device id (0x7906) here,
+ 			 * not 0x7916 (which is the SoC-integrated MT7916 on MT7986). The LED
+ 			 * pad function code on the discrete MT7916 is 4 (same as MT7915),
+ 			 * not 3 - measured on an Econet vGP-42X6V1 (EN7523 + MT7916,
+@@ -654,9 +660,9 @@
+ 			 * the 5G LED. See docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
+ 			 */
+ 			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
+-				       GENMASK(27, 24), 4);
++				       GENMASK(27, 24), 0);
+ 			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
+-				       GENMASK(31, 28), 4);
++				       GENMASK(31, 28), 0);
+ 			break;
+ 		default:
+ 			break;
+@@ -684,7 +690,7 @@
+ 			 * the 5G LED. See docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
+ 			 */
+ 			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
+-				       GENMASK(31, 28), 4);
++				       GENMASK(31, 28), 0);
+ 			break;
+ 		default:
+ 			break;
+@@ -712,7 +718,7 @@
+ 			 * the 5G LED. See docs/econet/42X6_openwrt_m4_ethernet.md muc 25.23.
+ 			 */
+ 			mt76_rmw_field(dev, MT_LED_GPIO_MUX1,
+-				       GENMASK(27, 24), 4);
++				       GENMASK(27, 24), 0);
+ 			break;
+ 		default:
+ 			break;
+--- a/mt7915/main.c
++++ b/mt7915/main.c
+@@ -5,6 +5,13 @@
+ #include <linux/platform_device.h>
+ #include <linux/pci.h>
+ #include <linux/module.h>
++#include <linux/leds.h>
++
++#if IS_ENABLED(CONFIG_MT76_LEDS)
++/* mt7915/init.c (patch 102): ghi truc tiep ma mux LED cho MT7916 PCIe */
++void mt7915_led_mux_set(struct led_classdev *led_cdev, bool on);
++#endif
++
+ #include "mt7915.h"
+ #include "mcu.h"
+ 
+@@ -101,6 +108,22 @@
+ 
+ 	flush_work(&dev->init_work);
+ 
++	/* MT7916 PCIe (Econet vGP-42X6V1): khoi LED noi bo khong lai duoc pad nen den
++	 * do duong brightness quyet dinh; pad da TAT tu luc init (patch 100 ghi ma 0).
++	 * Khi radio that su chay thi BAT: ghi thang ma mux (khong phu thuoc LED core)
++	 * VA cap nhat led_cdev->brightness qua LED core de mot work item bao TAT den
++	 * tre (mac80211 goi stop_tpt_led_trig khi iface dong) khong the tat nguoc lai.
++	 * Khi co tai, trigger tpt cua mac80211 van cho den nhay binh thuong.
++	 */
++	if (IS_ENABLED(CONFIG_MT76_LEDS) && mt76_chip(&dev->mt76) == 0x7906) {
++		struct led_classdev *led = &mt7915_hw_phy(hw)->mt76->leds.cdev;
++
++		if (led->dev) {
++			led_set_brightness(led, LED_FULL);
++			mt7915_led_mux_set(led, true);
++		}
++	}
++
+ 	mutex_lock(&dev->mt76.mutex);
+ 	ret = mt7915_run(hw);
+ 	mutex_unlock(&dev->mt76.mutex);
+@@ -121,6 +144,13 @@
+ 
+ 	clear_bit(MT76_STATE_RUNNING, &phy->mt76->state);
+ 
++	/* radio dung => den tat (xem mt7915_start) */
++	if (IS_ENABLED(CONFIG_MT76_LEDS) && mt76_chip(&dev->mt76) == 0x7906 &&
++	    phy->mt76->leds.cdev.dev) {
++		led_set_brightness(&phy->mt76->leds.cdev, LED_OFF);
++		mt7915_led_mux_set(&phy->mt76->leds.cdev, false);
++	}
++
+ 	if (phy != &dev->phy) {
+ 		mt76_connac_mcu_set_pm(&dev->mt76, phy->mt76->band_idx, 1);
+ 		mt7915_mcu_set_mac(dev, phy->mt76->band_idx, false, false);

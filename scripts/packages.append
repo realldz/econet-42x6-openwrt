@@ -1,0 +1,49 @@
+# Package selection for a vGP-42X6V1 image.
+#
+# scripts/build-firmware.sh appends these CONFIG_PACKAGE_* lines to the OpenWrt
+# .config, runs `make defconfig`, and then verifies that every one of them
+# survived -- defconfig silently drops a symbol whose dependencies are missing.
+#
+# Why this file exists at all: target airoha/en7523 is FEATURES:=source-only,
+# so there is no official package repository to install from on the running
+# board.  Anything an image needs has to be selected here, or baked in through
+# DEVICE_PACKAGES in the device definition.
+#
+# Rule: the value must be exactly "y", never "m".  CONFIG_PACKAGE_foo=m only
+# BUILDS the package; it does not install it into the rootfs, which produces an
+# image that is missing files and looks like a driver bug.
+
+# --- Wi-Fi: the AP daemon ---------------------------------------------------
+# DEVICE_PACKAGES brings the driver (kmod-mt7915e) and the firmware blobs, but
+# that is not enough: without wpad there is no /usr/sbin/hostapd, /etc/init.d/wpad
+# starts nothing, and no wlan* netdev ever appears.
+CONFIG_PACKAGE_wpad-mbedtls=y
+CONFIG_PACKAGE_hostapd-utils=y
+# iw is used by mac80211.sh when it has to set a MAC or read PHY state.
+CONFIG_PACKAGE_iw=y
+# iwinfo backs the Wi-Fi pages of the web UI.
+CONFIG_PACKAGE_iwinfo=y
+# regulatory.db, needed for `option country`.
+CONFIG_PACKAGE_wireless-regdb=y
+
+# --- management UI ----------------------------------------------------------
+# luci-ssl pulls in uhttpd + libustream-mbedtls + px5g-mbedtls; all of them are
+# named explicitly so a feed change cannot silently leave the board without a
+# web UI.
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-ssl=y
+CONFIG_PACKAGE_uhttpd=y
+CONFIG_PACKAGE_uhttpd-mod-ubus=y
+CONFIG_PACKAGE_luci-app-firewall=y
+CONFIG_PACKAGE_luci-app-package-manager=y
+
+# --- package manager --------------------------------------------------------
+# OpenWrt main ships apk (apk-tools 3.x); opkg no longer exists in the snapshot.
+# Note: `apk upgrade` is NOT safe on this board -- several packages in the
+# snapshot are built against a different zlib ABI than the image's.  See
+# docs/roadmap.md.
+CONFIG_PACKAGE_apk-mbedtls=y
+
+# --- diagnostics ------------------------------------------------------------
+# iperf3 is the throughput test used for the LAN/Wi-Fi acceptance checks.
+CONFIG_PACKAGE_iperf3=y

@@ -18,12 +18,17 @@ OpenWrt's Image Builder is a stripped-down buildroot that contains:
 Its whole design is that you never compile the kernel. `make image` picks a
 profile, installs packages, and assembles an image.
 
-This board needs two **kernel patches**:
+This board needs a series of **kernel patches** (see
+[openwrt/overlay/target/linux/airoha/patches-6.18/](../openwrt/overlay/target/linux/airoha/patches-6.18/)).
+The two that make an image unusable rather than merely limited are:
 
 | Patch | What happens without it |
 |---|---|
 | `arch/arm` `TEXT_OFFSET` | the kernel deadloops in `head.S` before it can print; the UART is completely silent |
 | the EN7523 root complex PCI fixup | the MT7916 can never DMA, and Wi-Fi times out with a misleading firmware error |
+
+The rest of the series (the EN7523 Ethernet/DSA/pcs patches) is what turns the
+board into a router, so it matters just as much for the result.
 
 An Image Builder cannot apply either of those, and it cannot add a device profile
 either, because profiles are compiled in. So no upstream Image Builder will ever
@@ -126,12 +131,27 @@ the helper copies them plus a `SHA256SUMS` into `--out`.
 `imagebuilder/files/` is copied into the image root. Right now it contains one
 first-boot script that sets the hostname and nothing else, deliberately:
 
-* there is no Ethernet driver yet, so a static network config would be fiction;
+* both the network and the wireless configuration are generated on the board --
+  `board.d/02_network` gives `br-lan` the four switch ports from the device tree,
+  and the wifi-detect hotplug script writes `/etc/config/wireless` with the
+  wireless interfaces disabled until an operator enables them -- so pinning
+  either file in the image would only fight that machinery;
 * the Wi-Fi PHY numbering is not stable across boots (the logs show `phy#0` on
   one boot and `phy2`/`phy3` on another), so a static `/etc/config/wireless`
-  would break.
+  would break. If you do want one, start from
+  [`openwrt/optional-configs/etc-config-wireless.example`](../openwrt/optional-configs/etc-config-wireless.example),
+  which binds the radios by PCIe `path` rather than by PHY number.
 
-Generate the wireless config at runtime instead:
+Two other things commonly go into `files/`:
+
+* `/lib/firmware/mediatek/mt7916_eeprom.bin` -- the default eeprom blob with your
+  unit's MAC written into it, otherwise Wi-Fi comes up with a random address on
+  every boot ([`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py));
+* nothing else for LEDs or buttons: they are described in the device tree, so
+  they work in any image built for this profile.
+
+The wireless interface stays down in a freshly flashed image. Enable it from the
+web UI, or from the console:
 
 ```sh
 wifi config
