@@ -4,9 +4,9 @@
 128 MiB SPI-NAND (Winbond W25N01K; block size 128 KiB, page size 2048, OOB 96).
 
 **Status:** `sysupgrade` writes slot B, reboots by itself and comes back on the new image with the
-overlay -- and therefore the SSH key and the root password -- intact. Sections 1-5, 7 and 8 are
-**proven on hardware**; section 6 is deliberately **not** enabled. This is the detail behind the
-"Reboot keeps config" row of [status.md](status.md); the boot chain is in [booting.md](booting.md),
+overlay -- and therefore the network, wireless and firewall configuration -- intact. Sections 1-5, 7
+and 8 are **proven on hardware**; section 6 is deliberately **not** enabled. This is the detail behind
+the "Reboot keeps config" row of [status.md](status.md); the boot chain is in [booting.md](booting.md),
 image contents in [building.md](building.md).
 
 ---
@@ -48,9 +48,9 @@ VFS: Mounted root (squashfs filesystem) readonly on device 31:5.
 Two things make an install persistent, and neither is `rootfs_data`. The squashfs is mounted read-only
 out of slot B, and `/overlay` is a **UBIFS volume on the `data` partition (mtd7)**, outside slot B,
 which the kernel auto-attaches (`UBI: auto-attach mtd7`) before `mount_root` switches to it. So an
-upgrade loses nothing: `sysupgrade` overwrites mtd3, while mtd7 -- holding `/etc/config`, the dropbear
-host keys and `/etc/dropbear/authorized_keys` -- is untouched. The overlay is deliberately not on
-`rootfs_data` (mtd6), which lives *inside* slot B and is discarded on every upgrade.
+upgrade loses nothing: `sysupgrade` overwrites mtd3, while mtd7 -- holding `/etc/config` and the
+dropbear host keys -- is untouched. The overlay is deliberately not on `rootfs_data` (mtd6), which
+lives *inside* slot B and is discarded on every upgrade.
 
 ## 2. `platform.sh`: what `sysupgrade` needs
 
@@ -199,8 +199,15 @@ sysupgrade -T /tmp/image.bin             # validate only: no write, no reboot
 sysupgrade    /tmp/image.bin             # keep the configuration (no -n)
 ```
 
-`-n` is avoided because the overlay holds `/etc/dropbear/authorized_keys` and the root password, which
-are how you get back into a board whose freshly written image does not come up. Here `-n` does *not*
+`-n` is avoided because it throws away the configuration the board is meant to keep. It is *not* what
+decides whether you can log in again, and it is worth being precise about that, because an earlier
+revision of this file claimed the overlay holds "the SSH key": **there is no
+`/etc/dropbear/authorized_keys` on this board at all** (only the three host keys), and the shipped
+image has an **empty root password** (`root:::` in `/etc/shadow`), so dropbear on the LAN accepts the
+SSH `none` method without a key or a password -- verified with `ssh -v`, which ends in
+`Authenticated to 192.168.1.1 ... using "none"`. Access therefore does not depend on the overlay; the
+ways back into a board whose new image does not come up are slot A's untouched vendor image and the
+UART console. Here `-n` does *not*
 mean "the overlay is erased": `/overlay` is a UBIFS volume on its own partition (mtd7), so the image
 write never touches it. What `-n` changes is the configuration the *installed* system starts from, and
 the shipped `platform.sh` handles it explicitly -- it detects a clean install through `UPGRADE_BACKUP`
@@ -218,13 +225,18 @@ head -c 4 /dev/mtd3 | hexdump -C       # d0 0d fe ed  = bare FIT at offset 0 of 
 head -c 4 /dev/mtd2 | hexdump -C       # 48 44 52 32  = "HDR2", slot A untouched
 cat /proc/cmdline                      # root=/dev/mtdblock5 rootfstype=squashfs
 ls /rom/lib/upgrade/platform.sh        # /rom is the squashfs of the image that is running
-ls -l /etc/dropbear/authorized_keys    # the overlay (and the way back in) survived
+ls -l /etc/config/network              # created only in the overlay -> the overlay survived
 ```
 
-The board is still reachable at its usual LAN address (`192.168.1.1` unless it was changed) with the
-same SSH key. `/rom` is the read-only squashfs of the *running* image, so anything only the new image
-ships proves the flash took effect; `/lib/upgrade/platform.sh` is a convenient one, because an image
-built before section 2 does not have it.
+`sysupgrade -T` is worth one caveat: it exits 0 whether or not it likes the image, so read its
+*messages*, not its status. A missing or foreign image prints `Image metadata not present`, while a
+valid one prints nothing at all.
+
+The board is still reachable at its usual LAN address (`192.168.1.1` unless it was changed), and with
+the same credentials, because the shipped image has an empty root password -- nothing about access
+lives in the overlay. `/rom` is the read-only squashfs of the *running* image, so anything only the new
+image ships proves the flash took effect; `/lib/upgrade/platform.sh` is a convenient one, because an
+image built before section 2 does not have it.
 
 **Do not verify with a raw hash comparison -- the obvious check is wrong on this board:**
 
