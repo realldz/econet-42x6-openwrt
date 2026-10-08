@@ -134,13 +134,28 @@ echo "    debug modules  package/kernel/{pciedbg,ringwatch}/  (built, not instal
 # ---------------------------------------------------------------------------
 owns="$REPO/openwrt/overlay/target/linux/$TARGET/patches-$KERNEL_SERIES"
 stale=0
-for f in "$OWRT/target/linux/$TARGET/patches-$KERNEL_SERIES"/*.patch; do
-	[ -e "$f" ] || continue
-	if [ ! -e "$owns/$(basename "$f")" ]; then
-		echo "!! patch in the tree that this repo does not ship: $(basename "$f")" >&2
-		stale=1
-	fi
-done
+# Only a patch that the tree's own git does not track and this repo does not ship
+# is a hand-applied leftover.  Scanning every *.patch in the directory instead
+# also flags every patch OpenWrt itself ships (hundreds of lines of noise from
+# the airoha target), and a warning that fires on everything gets ignored.
+if git -C "$OWRT" rev-parse --git-dir >/dev/null 2>&1; then
+	git -C "$OWRT" ls-files --others --exclude-standard -- \
+		"target/linux/$TARGET/patches-$KERNEL_SERIES" 2>/dev/null |
+	while IFS= read -r f; do
+		if [ ! -e "$owns/$(basename "$f")" ]; then
+			echo "!! patch in the tree that this repo does not ship: $(basename "$f")" >&2
+			stale=1
+		fi
+	done
+else
+	for f in "$OWRT/target/linux/$TARGET/patches-$KERNEL_SERIES"/*.patch; do
+		[ -e "$f" ] || continue
+		if [ ! -e "$owns/$(basename "$f")" ]; then
+			echo "!! patch in the tree that this repo does not ship: $(basename "$f")" >&2
+			stale=1
+		fi
+	done
+fi
 if [ "$stale" -eq 1 ]; then
 	echo "   Remove it if it is a leftover, or keep it and note why; the build" >&2
 	echo "   applies everything in that directory.  Verify the image afterwards." >&2

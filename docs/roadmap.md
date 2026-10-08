@@ -87,9 +87,11 @@ and 6.18.54, so `pcs-en7523.c` needs `devm_fwnode_pcs_add_provider()`.
 3. Bring up the optical side: the `en7571` laser driver and its hwmon exposure
    first, then `phy-airoha-xpon.c` and the PON PHY.
 4. Close the device tree questions the stage 2 overlay lists as open: the `pon`
-   pinctrl group, whether the `xpon_phy` node needs more register windows, and where
-   the laser actually sits (DDMI points at the PON PHY block's internal I2C, not the
-   SoC's `i2c0`). Confirm the GPIO 16 laser-disable polarity.
+   pinctrl group and whether the `xpon_phy` node needs more register windows.
+   ~~where the laser actually sits~~ **Settled on hardware 2026-10-08**: the EN7571 answers on the SoC's
+   own `i2c0` at address `0x70` (`i2cdetect -y -r 0` on image `img24`), so the "DDMI only exists on the
+   PON PHY block's internal I2C" reading of the vendor firmware is not the whole story -- see
+   [pon-port.md](pon-port.md) section 13. Still open: the GPIO 16 laser-disable polarity.
 5. Only then M4: the O5 state machine and the OMCI agent's MIB round-trip, using the
    identity from the factory partition.
 

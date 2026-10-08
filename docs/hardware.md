@@ -233,7 +233,8 @@ a cable reached the board and, through the Wi-Fi AP, the air
 The BOB blob is the per-unit laser bias/APC calibration. Do not copy it from another unit, and do not
 overwrite it.
 
-**Unresolved -- which I2C bus carries the laser DDMI.** The two candidate topologies are:
+**Settled on hardware, 2026-10-08 -- the laser DDMI is reachable on the SoC's own I2C0.** The two candidate
+topologies were:
 
 - The BOSA sits on the PON PHY block's internal I2C master. Supporting evidence: the stock firmware
   exposes no `/dev/i2c-*` device at all, and `/proc/pon_phy/debug` reports
@@ -242,11 +243,13 @@ overwrite it.
 - The BOSA sits on the SoC `i2c0` (base `0x1fbf8000`), as documented for the Zyxel PX3321-T1, which
   is the same EN7523 + MT7916 + EN7571 combination and which places the EN7571 at I2C address `0x70`.
 
-The evidence currently leans towards the PON PHY's internal I2C master, but the question is open.
-Related open items: I2C address `0x70` has not been confirmed by a bus scan on this unit (no i2c-dev
-node exists on stock), and no test with fiber present and the PON MAC enabled has been recorded. If
-the BOSA turns out to be behind the PHY, the optical frontend must hang off the PHY
-(`phys = <&xpon_phy>`) instead of being declared as an `i2c0` child. Live PON state at capture time:
+The second one is what the hardware does: with an image that enables `i2c0` and the `i2c-mt7621` driver
+(`img24`), `i2cdetect -y -r 0` reports a device at **`0x70`** and a single read byte returns `0x10`. The
+stock firmware simply does not enable or expose that bus, which is why the first reading looked like the
+only option. Consequences: the optical frontend is declared as an `i2c0` child
+(`compatible = "airoha,en7571"`), not as a PHY consumer, and the BOB blob belongs in an `nvmem-cell`.
+See [pon-port.md](pon-port.md) section 13. Still unconfirmed: whether a fiber-present PON MAC changes
+anything, and the GPIO 16 laser-disable polarity. Live PON state at capture time (stock firmware):
 `/proc/xpon/ponInfo` reported `Mode: Error` with the PON MAC not enabled (the unit was running in
 etherWAN mode), `/proc/pon_phy/info` reported `PHY Status: unplug`, and LOS = 1.
 

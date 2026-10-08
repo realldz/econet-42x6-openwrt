@@ -47,3 +47,12 @@ CONFIG_PACKAGE_apk-mbedtls=y
 # --- diagnostics ------------------------------------------------------------
 # iperf3 is the throughput test used for the LAN/Wi-Fi acceptance checks.
 CONFIG_PACKAGE_iperf3=y
+# i2c-tools: `i2cdetect -y -r 0` looks for the EN7571 laser driver on the
+# optical I2C bus at address 0x70 (M3 step 1).  Read mode only -- never write
+# to the BOSA/laser.
+CONFIG_PACKAGE_i2c-tools=y
+# The controller itself is a module (the target sets CONFIG_I2C=m, and Kconfig
+# clamps a tristate child to its parent), so it needs a kmod package that is
+# selected explicitly -- see openwrt/patches/0005-*.patch, which declares
+# kmod-i2c-mt7621.  Without this line the image builds fine but has no driver.
+CONFIG_PACKAGE_kmod-i2c-mt7621=y

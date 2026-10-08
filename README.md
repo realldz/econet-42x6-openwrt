@@ -60,7 +60,7 @@ Everything that mutates the OpenWrt tree lives under [`openwrt/`](openwrt/).
 | Flash | SPI-NAND **Winbond W25N01K**, 128 MiB, 2048-byte pages, 128 KiB blocks |
 | Wi-Fi | MediaTek **MT7916** on PCIe (2.4 + 5 GHz), functions `14c3:7906` / `14c3:790a` |
 | Ethernet | 4x GbE through the internal MT7530 switch, driven by DSA in MMIO mode |
-| Optical | GPON BOSA + EN7571 laser driver -- **not brought up yet** |
+| Optical | GPON BOSA + EN7571 laser driver -- **the laser responds on the SoC's I2C0 at `0x70`** (`i2cdetect -y -r 0`); the driver and hwmon are not written yet |
 | Console | UART at 115200n8 |
 
 Full detail, including the SPI-NAND partition map and which regions must never be
@@ -74,7 +74,7 @@ written: [`docs/hardware.md`](docs/hardware.md).
 |---|---|---|
 | **M1** boot to userspace on real hardware | **done** | console, 512 MiB, 7 MTD partitions, both PCIe ports enumerate |
 | **M2** bring-up outside PON | **done** | LAN up (4x GbE), Wi-Fi up with a real client, a reboot keeps its configuration |
-| **M3** optical / PON PHY | not started | sources located; the xPON/optical stack compiles (32 of 34 objects) but nothing runs |
+| **M3** optical / PON PHY | **started** | the SoC's I2C0 is up and the EN7571 answers at `0x70`; the `en7571` driver, hwmon and the xPON/optical stack (32 of 34 objects compile) are still to be brought up |
 | **M4** GPON O5 + OMCI | not started | -- |
 
 Proven working, on the board, from a clean boot:
@@ -95,10 +95,12 @@ Proven working, on the board, from a clean boot:
 
 Not working yet, and the reason why:
 
-* **GPON / optical.** Beyond locating the sources and compiling most of them,
-  untouched. The xPON port is blocked on an `airoha_eth.h` API mismatch: the
-  community header is not a superset of OpenWrt's, and swapping it in breaks the
-  Ethernet driver that now works. See [docs/pon-port.md](docs/pon-port.md).
+* **GPON / optical.** The optical bus is no longer a guess: with `i2c0` and the `i2c-mt7621` driver
+  enabled, the EN7571 laser driver answers at `0x70`, so the frontend can be built as an `i2c0` child the
+  way the community trees do it. Still untouched: the `en7571` driver itself, its hwmon exposure, and the
+  xPON device tree nodes. The datapath is also blocked on an `airoha_eth.h` API mismatch: the community
+  header is not a superset of OpenWrt's, and swapping it in breaks the Ethernet driver that now works.
+  See [docs/pon-port.md](docs/pon-port.md) section 13.
 * **Per-unit calibration.** The EFuse is blank, so Wi-Fi falls back to the
   default eeprom blob. The MAC address is no longer random -- a helper here
   writes a unit address into that blob -- but the real per-unit calibration in

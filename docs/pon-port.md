@@ -252,15 +252,15 @@ temperature control loops, and DDMI, with `compatible = "airoha,en7571"` and cal
 expose the DDMI values as hwmon attributes -- **temperature, supply voltage, Tx bias current, Tx/Rx
 optical power**. That last layer is the measurable part of M3.
 
-**Nothing has been probed.** No `en7571` driver has ever been loaded on this board, no hwmon
-attribute has been read, and no bias current or temperature has been obtained under OpenWrt. What
+**Nothing has been probed on the optical side yet.** No `en7571` driver has been loaded on this board, no
+hwmon attribute has been read, and no bias current or temperature has been obtained under OpenWrt. What
 *is* known is that the DDMI path works on the vendor firmware: `/proc/pon_phy/DDMI_check_8472`
 returns plausible values (supply voltage 32622, temperature 12214, Tx bias and Tx power near zero
-because the laser was off), and it goes through the **PON PHY block's internal I2C master**, not
-through `/dev/i2c-*` (the device has no i2c-dev nodes). So the open question is whether the BOSA
-sits on that internal bus or on the SoC's `i2c0` (base `0x1fbf8000`; the EN7571 is at address
-`0x70` in the public notes for the same EN7523 + MT7916 + EN7571 combination). The device tree
-cannot be finalised until that is settled, and the polarity of the GPIO 16 TX-disable line has to
+because the laser was off), and on that firmware it goes through the **PON PHY block's internal I2C
+master** rather than through `/dev/i2c-*` (the stock device has no i2c-dev nodes). That made it an open
+question whether the BOSA sits on that internal bus or on the SoC's `i2c0` (base `0x1fbf8000`; the EN7571
+is at address `0x70` in the public notes for the same EN7523 + MT7916 + EN7571 combination) -- and it is
+now answered in favour of `i2c0`: see section 13. The polarity of the GPIO 16 TX-disable line still has to
 be tried both ways -- see section 11. As of 2026-10-08 there is an answer to prefer: the community
 drivers and the one public EN7523 write-up both put the EN7571 on the SoC `i2c0` as an ordinary I2C
 child, and neither uses the PHY-internal master. Section 12 records the sources, and what enabling
@@ -310,7 +310,7 @@ sibling MIPS parts.
 
 | Project | Hardware | State (2026-10-08) | What it is worth here |
 |---|---|---|---|
-| [`Sirherobrine23/airoha_kernel`](https://github.com/Sirherobrine23/airoha_kernel), branch `airoha_en7523_all` | EN7523, EN7528, EN751221, EN7580 | Actively pushed (head `44641f1d`, 2026-10-08; ~33 commits newer than the `3c44110a` snapshot this document was measured against) | The source this port already uses: `net/xpon` with the in-kernel OMCI agent, `drivers/net/optical` (EN7570/71/72/73), `phy-airoha-xpon.c`. The author's own caveat, on the forum: "everything is still proof of concept at en7523". |
+| [`Sirherobrine23/airoha_kernel`](https://github.com/Sirherobrine23/airoha_kernel), branch `airoha_en7523_all` | EN7523, EN7528, EN751221, EN7580 | Actively pushed (head `44641f1d`, 2026-10-08; 32 commits newer than the `3c44110a` snapshot this document was measured against) | The source this port already uses: `net/xpon` with the in-kernel OMCI agent, `drivers/net/optical` (EN7570/71/72/73), `phy-airoha-xpon.c`. The author's own caveat, on the forum: "everything is still proof of concept at en7523". |
 | [`Sirherobrine23/openwrt`](https://github.com/Sirherobrine23/openwrt), branch `airoha_en7523` (`1b46c9c8`), posted as [openwrt PR #20104](https://github.com/openwrt/openwrt/pull/20104) | `airoha` target, EN7523 subtarget | Open, **draft**, 162 commits / 613 files, updated 2026-10-08 | An OpenWrt tree that already sets `CONFIG_XPON`, `CONFIG_XPON_OAM`, `CONFIG_XPON_OMCI` and `CONFIG_AIROHA_XPON_V1` for `en7523`, with ~66 board DTS. This is the Kconfig block and the DTS set to diff against. PR body: "very unstable for prodution, but working for testing". |
 | [openwrt PR #24577](https://github.com/openwrt/openwrt/pull/24577) (AKoo7) | EN7528 (MIPS), JCOW407 / DASAN H660GM-A | Open, 182 files, active 2026-10-08; claims **O5, full OMCI, PPPoE and LAN NAT on live fibre** | A second, independent end-to-end implementation with the same EN7571 front-end, plus a userspace `econet-omcid` and a LuCI status app. **Licence red flag:** one of the ported files carries an EcoNet header that reads "confidential and proprietary ... strictly prohibited", so that code is not usable as GPL -- read it for shape only. |
 | [`Cris7015/xr500v-openwrt`](https://github.com/Cris7015/xr500v-openwrt) | EN7526G / EN751221 (MIPS) | Release `v2026.10.07`: "O5, OMCI and PPPoE", tested end to end on a live line | The deepest public EN757x optics lab log (about 60 dated notes), and the idea of taking the ONU serial from the U-Boot environment (`gpon-serial-number`) instead of a partition. |
@@ -342,11 +342,27 @@ exist is `net/pon` plus `pon-tool`.
   `CONFIG_I2C=m` and `CONFIG_I2C_CHARDEV=m` only, `CONFIG_I2C_MT7621` is unset, and there is no
   `/sys/class/i2c-adapter/` on the board. The community tree adds the compatible to
   `drivers/i2c/busses/i2c-mt7621.c` (an `airoha_caps` struct and one match entry, about fifteen
-  lines). The vendor firmware's internal path through the PON PHY block stays the fallback.
+  lines). Stronger evidence than the Zyxel write-up: **three EN7523 boards** in the fork's own tree
+  (`askey_rtf8225vw`, `mitrastar_gpt_2742gx4x5v6`, `tplink_xx230v_v1`) all wire the same child on
+  `&i2c0`, and all three feed the laser its calibration data through an **nvmem cell** instead of a
+  raw flash offset -- `en7571: lddla@70 { compatible = "airoha,en7571"; reg = <0x70>;
+  nvmem-cells = <&en7571_bob>; }` with `en7571_bob` carved out of the calibration area (`0xc0000`,
+  `0x140000`, `0x1c0400` depending on the board). That is the shape to copy for the BOB blob.
+  Verified against the raw DTS on 2026-10-08: on the Askey board the cell is
+  `en7571_bob@1c0400 { reg = <0x1c0400 0xff>; }` inside the `art` UBI volume, the frontend is wired
+  into the MAC with `optical-frontends = <&en7571>` plus `optical-frontend-names = "pon"`, GDM2 is
+  claimed with `airoha,xpon-managed` and `openwrt,netdev-name = "pon0"` while its `pcs-handle` is
+  deleted, and the GPON serial number comes from the bootloader environment (`gponsn: asp_gpon_sn`
+  in the `ubootenv2` volume) rather than from a flash offset -- worth checking in this board's own
+  bootloader environment when the MAC work starts. The vendor firmware's internal path through the
+  PON PHY block stays the fallback.
 * **How wide the API gap is** (section 5). Re-measured today: the community `airoha_eth.h` is 4,988
-  lines against 801 here, `airoha_eth.c` is 10,871 against 4,700, and the header exports **20**
-  `airoha_eth_*xpon*()` entry points, not 17. The surface is still growing, which is the argument for
-  doing the shim once, keeping it small, and measuring it again before the next attempt.
+  lines against 801 here and `airoha_eth.c` is 10,871 against 4,700. The header now carries **20**
+  names matching `airoha_eth_*xpon*()`; the 17 counted in section 5 are the `EXPORT_SYMBOL_GPL`
+  dispatchers, and the previous header already had 18 of the 20 names, so only two functions are
+  genuinely new (`xpon_retire_all`, `xpon_retire_channel` -- retiring a service). The surface is
+  still growing, which is the argument for doing the shim once, keeping it small, and measuring it
+  again before the next attempt.
 
 ### 12.2 What to read first
 
@@ -358,3 +374,113 @@ exist is `net/pon` plus `pon-tool`.
    optics checks and the BOB calibration location.
 5. PR #24577's `econet-omcid` and `luci-app-econet-xpon`, read for shape rather than copied, and
    Cris7015's `notes/` for what an EN757x bring-up actually looks like day by day.
+---
+
+## 13. M3, step 1: turning on I2C0 to settle where the laser sits (2026-10-08)
+
+Section 12.1 settled this question on paper; this section is the first half of settling it on hardware. The
+step is deliberately the cheapest of the four remaining PON jobs: the controller needs a fifteen-line
+driver variant and one device-tree node, the probe is read-only, and the answer does not need an OLT.
+
+### 13.1 What changed
+
+| Where | Change |
+|---|---|
+| `openwrt/overlay/target/linux/airoha/patches-6.18/930-52-airoha_en7523_all-i2c-mt7621-add-EN7523-SoC-support.patch` | Adopts the community `drivers/i2c/busses/i2c-mt7621.c` wholesale: it adds `struct mtk_i2c_caps` (`max_clk_div` 0xfff, atomic polling, no CFG2 register), an `airoha_caps` instance and **one** match entry `{ .compatible = "airoha,en7523-i2c", .data = &airoha_caps }`. 203 lines / 5.7 kB; the community file is 372 lines against 342 here (12 clean hunks). It applies on top of the target's own `885-i2c-mt7621-optional-reset.patch`, which touches the same file. |
+| `openwrt/overlay/target/linux/airoha/dts/en7523-vgp42x6v1.dts` | Two nodes in the root block: `i2cclock: i2cclock@0` (fixed 20 MHz clock) and `i2c0: i2c0@1fbf8000` (`airoha,en7523-i2c`, `reg = <0x1fbf8000 0x100>`, `clocks = <&i2cclock>`, `clock-frequency = <100000>`, one address cell, `status = "okay"`). No pinctrl: the I2C pads keep the SoC defaults. |
+| `openwrt/patches/0003-*.patch` | `CONFIG_I2C_MT7621=y`. Kconfig then clamps it to `=m`, because the target sets `CONFIG_I2C=m` -- see 13.2.3. |
+| `openwrt/patches/0005-*.patch` (new) | Declares `KernelPackage/i2c-mt7621` in `target/linux/airoha/modules.mk`, so the module can actually reach the rootfs. |
+| `scripts/packages.append` | `CONFIG_PACKAGE_i2c-tools=y` (for `i2cdetect`) and `CONFIG_PACKAGE_kmod-i2c-mt7621=y`. |
+
+A useful side effect: the label `i2c0` did not exist anywhere before, so `en7523-vgp42x6v1-pon.dtsi` --
+which already carries `xpon`, `xpon_phy`, `pon_pcs` and an `&i2c0 { en7571@70 { ... }; }` child -- could not
+be included at all. The device tree now has the label, so enabling PON later will not have to touch the I2C
+part again.
+
+### 13.2 Three build-system traps this step walked into
+
+**1. A whole-file guard silently dropped a new config symbol.** The kernel-config step used to test for one
+symbol (`JFFS2_FS=y`) and then skip the entire append file, so a symbol added later was never applied --
+the build stays green and the image is simply missing the feature. It now applies the append file symbol by
+symbol and reports how many lines it added. This is the failure mode to remember: *check the payload, not
+the exit code*.
+
+**2. The stale-patch warning cried wolf.** It compared every file in `patches-6.18/` against this
+repository's patch set, which flagged every patch OpenWrt itself ships (hundreds of lines). It now lists
+only files that the tree's own git does not track *and* this repository does not ship -- i.e. real
+hand-applied leftovers. A warning that fires on everything gets ignored, which is how a trace patch once
+rode along into 21 consecutive images.
+
+**3. A kernel symbol set to `=m` does not automatically become a kmod package.** This is the expensive one:
+
+1. `CONFIG_I2C=m` in the target forces `CONFIG_I2C_MT7621` down to `=m` (a tristate child cannot be `=y`
+   while its parent is `=m`), whatever the config file asks for.
+2. OpenWrt only creates a `kmod-*` package for symbols declared explicitly in
+   `package/kernel/linux/modules/*.mk` or in a target's `modules.mk`. `i2c-mt7621` is in neither, so
+   nothing installed `i2c-mt7621.ko` into the rootfs.
+3. Evidence: the package index listed `kmod-pwm-airoha` (declared in the airoha target's `modules.mk`) but
+   not `kmod-i2c-mt7621`, and an otherwise successful image build contained only `i2c-core.ko` and
+   `i2c-dev.ko`. `openwrt/patches/0005-*.patch` fixes this; selecting `kmod-i2c-mt7621` is then enough.
+
+Worth recording for later: `kmod-i2c-core` ships **both** `i2c-core.ko` and `i2c-dev.ko` (see
+`I2C_CORE_MODULES` in `package/kernel/linux/modules/i2c.mk`), and it is already selected, so `/dev/i2c-N`
+exists as soon as the controller is bound -- no extra package needed.
+
+**4. The build environment has no network access.** Any new package source has to be fetched outside and
+placed in `dl/` by hand; otherwise the build fails at download with a message that looks like a source
+error. (`i2c-tools` 4.4 was fetched from kernel.org this way; its sha256 matches the feed's `PKG_HASH`.)
+Two further facts about this tree's build: the default target is `world`, which compiles the whole feed
+(including a host Python with profile-guided optimisation, tens of minutes) even though almost none of it
+is installed, and the image is assembled from a rootfs cache, so a newly selected package only enters the
+image through a full `make` -- `make package/install` plus `make target/install` completes in seconds and
+quietly omits it.
+
+### 13.3 Verification so far, and what comes next
+
+Static checks before any flash: the patched kernel sources contain `airoha_caps` and the
+`airoha,en7523-i2c` match; the kernel `.config` has `CONFIG_I2C_MT7621=m`; `i2c-mt7621.o`, `i2c-mt7621.ko`
+and `vmlinux` are all built; and the OpenWrt `.config` selects `kmod-i2c-mt7621`, `i2c-tools`, `libi2c` and
+`kmod-i2c-core`. The image is then checked by unpacking its squashfs payload and confirming that
+`i2c-mt7621.ko` and `usr/sbin/i2cdetect` are really there.
+
+On the board the sequence is read-only: `dmesg | grep -i i2c`, `/sys/class/i2c-adapter/`, `i2cdetect -l`,
+then **`i2cdetect -y -r 0`**. The `-r` matters: the default quick-write probe writes an address byte, while
+`-r` only reads, and this bus may carry the laser driver. `i2cset` against `0x70` is never acceptable.
+If `0x70` answers, the community wiring is right for this board too and job 2 of the port (the optical
+frontend) follows `px3321-en7523-notes` and the fork's three EN7523 boards directly; if the bus is silent,
+the vendor firmware's internal path through the PON PHY block is the only one left and the EN7571 driver
+work has to start from the vendor binary instead. Directly relevant to that caution: the community PON
+nodes declare `tx-disable-gpios = <&pinctrl 16 GPIO_ACTIVE_HIGH>`, which is the same GPIO 16 this project
+already treats as untouchable.
+
+### 13.4 Result (2026-10-08)
+
+The bus is up and the answer matches the community: **the BOSA/EN7571 is on the SoC's I2C0 at address
+`0x70`.**
+
+| Measurement | Value |
+|---|---|
+| `dmesg` | `i2c_dev: i2c /dev entries driver`, `i2c-mt7621 1fbf8000.i2c0: clock 100 kHz` |
+| adapter | `i2cdetect -l` lists `i2c-0  i2c  1fbf8000.i2c0  I2C adapter`; `/sys/bus/i2c/devices/i2c-0` exists |
+| running device tree | `/proc/device-tree/i2c0@1fbf8000`: `compatible=airoha,en7523-i2c status=okay`, plus `i2cclock@0` |
+| modules | `i2c_mt7621 12288 0`, `i2c_core 40960 3 i2c_mt7621,hwmon,i2c_dev` |
+| **bus scan** | `i2cdetect -y -r 0` prints `70` in row `70:` |
+| single read | `i2cget -y 0 0x70` returns `0x10` |
+
+So the optical frontend work follows the community shape directly (`compatible = "airoha,en7571"`, BOB
+through an `nvmem-cell`, `optical-frontends = <&en7571>` on the xPON node, `airoha,xpon-managed` on GDM2),
+and the vendor firmware's internal path through the PON PHY block is not needed for DDMI -- it stays only
+as a fallback. Two things are worth carrying forward:
+
+* On this board `/sys/class/i2c-adapter/` does **not** exist even though the adapter is registered and
+  `i2cdetect` works. Check `/sys/bus/i2c/devices/` or `i2cdetect -l` before concluding a bus is missing.
+* `sha256sum` over the whole `mtd3` partition never equals the sha256 of the built image, and that is
+  normal: OpenWrt appends a metadata block to the *file* (JSON with `metadata_version` and
+  `supported_devices`, then an `FWx0` magic plus CRC) and `sysupgrade` does not write it to flash. Verify by
+  comparing the FIT region (sized by the header's `totalsize`) and the squashfs region instead. Here the FIT
+  matched byte for byte and the rootfs matched in every 1 MB chunk; only the final chunk, which holds the
+  metadata, differed.
+
+Post-flash health, for the record: kernel 6.18.54, WiFi AP up on the MT7916 with the same `mt7915e.ko` and
+eeprom hashes as the previous image, overlay preserved, vendor slot A untouched (`1.2.00.241216`),
+AIROHA-TRACE count 0, and no new warnings in `dmesg`.

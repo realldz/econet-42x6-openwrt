@@ -15,7 +15,7 @@ milestone is only "done" when its stated acceptance test passes.
 |---|---|---|---|
 | **M1** | Boot to userspace over RAM | shell on the console, `/proc/mtd` lists the partitions, 512 MiB reported | **done** |
 | **M2** | Bring-up outside PON | SPI-NAND + BMT, 4x GbE switch, PCIe MT7916, LEDs/buttons, `data` overlay. "LAN up, Wi-Fi up, reboot keeps config" | **done** |
-| **M3** | Optical | `en7571` probes, hwmon exposes bias/temperature, `tx_enabled=1` | not started |
+| **M3** | Optical | `en7571` probes, hwmon exposes bias/temperature, `tx_enabled=1` | **step 1 done**: the SoC's I2C0 is up and the EN7571 answers at `0x70`; the driver and hwmon are next ([pon-port.md](pon-port.md) section 13) |
 | **M4** | GPON O5 + OMCI | `GPON netdev link ready: O5=1 OMCI=1`, OLT accepts the ONU, OMCI MIB replies | not started |
 
 ## M1 -- done `[hardware]`
@@ -111,9 +111,12 @@ the blob (`tools/mt7916_eeprom_mac.py`) gives the interfaces a stable identity
 identity, laser BOB) sits in the vendor factory block in the trailing raw region
 and is **not** read yet. See [wifi.md](wifi.md) and [hardware.md](hardware.md).
 
-## M3 / M4 -- not started
+## M3 / M4 -- M3 started (optical bus up), M4 not started
 
-Nothing optical has run, but the port is no longer unmapped `[not verified]`:
+The optical side has now been touched on hardware: the SoC's I2C0 came up and the EN7571 laser driver
+answered at address `0x70` (`i2cdetect -y -r 0`, image `img24`, 2026-10-08 -- [pon-port.md](pon-port.md)
+section 13). The `en7571` driver, its hwmon exposure and the xPON device tree nodes are still to come, so
+nothing optical has *driven* anything yet. The port is no longer unmapped `[not verified]`:
 
 * the community xPON and optical sources were compiled object by object against
   this kernel (6.18.54): **32 of 34 objects build clean**, including all of
@@ -144,8 +147,9 @@ today, because the bindings it references do not exist yet. Status and next step
 
 ## Still broken or open
 
-* **PON and optical (M3, M4).** Nothing has been run on hardware.
-  `[not verified]`
+* **PON and optical (M3, M4).** The optical bus is confirmed (I2C0 up, EN7571 answers at `0x70`), but
+  nothing optical has driven or reported a measurement yet: no `en7571` driver, no hwmon reading.
+  `[partially verified]`
 * **Real per-unit RF calibration.** Wi-Fi runs on the default blob, so the
   calibration is generic rather than the unit's own. The MAC is stable, but it is
   not read from the factory block. `[not verified]`

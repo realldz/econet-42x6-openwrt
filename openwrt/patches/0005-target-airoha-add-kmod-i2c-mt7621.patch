@@ -1,0 +1,40 @@
+diff --git a/target/linux/airoha/modules.mk b/target/linux/airoha/modules.mk
+index f55e1c0..f22d712 100644
+--- a/target/linux/airoha/modules.mk
++++ b/target/linux/airoha/modules.mk
+@@ -23,3 +23,35 @@ endef
+ $(eval $(call KernelPackage,pwm-airoha))
+ 
+ 
++# ---------------------------------------------------------------------------
++# Econet vGP-42X6V1 (EN7523) -- kmod package for the SoC I2C controller
++#
++# OpenWrt does NOT auto-generate a kmod package for every kernel symbol set to
++# =m: only symbols declared in package/kernel/linux/modules/*.mk (or in a
++# target's modules.mk, as here) become a kmod-* package.  Without the block
++# below, CONFIG_I2C_MT7621=m only produces i2c-mt7621.ko inside the kernel tree
++# and no package installs it into the rootfs -- the same trap as
++# CONFIG_PACKAGE_*=m, and the build still reports success.  Checked 2026-10-08:
++# tmp/.config-package.in listed kmod-pwm-airoha (from this file) but not
++# kmod-i2c-mt7621, and the rootfs held only i2c-core.ko + i2c-dev.ko.
++#
++# Select it with CONFIG_PACKAGE_kmod-i2c-mt7621=y (scripts/packages.append).
++# kmod-i2c-core ships both i2c-core.ko and i2c-dev.ko, which is what provides
++# /dev/i2c-N for i2cdetect.
++# ---------------------------------------------------------------------------
++
++define KernelPackage/i2c-mt7621
++  SUBMENU:=$(OTHER_MENU)
++  TITLE:=Airoha EN7523 SoC I2C controller
++  DEPENDS:=+kmod-i2c-core
++  KCONFIG:=CONFIG_I2C_MT7621
++  FILES:=$(LINUX_DIR)/drivers/i2c/busses/i2c-mt7621.ko
++  AUTOLOAD:=$(call AutoProbe,i2c-mt7621)
++endef
++
++define KernelPackage/i2c-mt7621/description
++ I2C controller driver for the Airoha EN7523 SoC (MT7621-compatible block).
++ Needs patch 930-52 for the "airoha,en7523-i2c" compatible string.
++endef
++
++$(eval $(call KernelPackage,i2c-mt7621))

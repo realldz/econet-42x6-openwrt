@@ -59,6 +59,37 @@
 
 	/*
 	 * ------------------------------------------------------------------
+	 * I2C0 (0x1fbf8000) -- the optical bus (BOSA/EN7571 at 0x70)
+	 * ------------------------------------------------------------------
+	 * On the stock firmware the DDMI values are read through the PON PHY
+	 * block's *internal* I2C master, while the community tree and the one
+	 * public EN7523 port (Zyxel PX3321-T1) both put the EN7571 on the SoC's
+	 * I2C0 at address 0x70. This is the experiment that settles it: enable
+	 * the bus and the driver, then scan for 0x70 with `i2cdetect -y -r 0`.
+	 * - airoha_caps: max_clk_div 0xfff, atomic polling, no CFG2 register
+	 *   (patch 930-52, taken from the airoha_en7523_all branch).
+	 * - fixed 20 MHz clock, 100 kHz bus. No pinctrl: the I2C pads use the
+	 *   SoC defaults.
+	 * READ ONLY: never write to the BOSA/laser during this experiment.
+	 */
+	i2cclock: i2cclock@0 {
+		#clock-cells = <0>;
+		compatible = "fixed-clock";
+		clock-frequency = <20000000>;
+	};
+
+	i2c0: i2c0@1fbf8000 {
+		compatible = "airoha,en7523-i2c";
+		reg = <0x1fbf8000 0x100>;
+		clocks = <&i2cclock>;
+		clock-frequency = <100000>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		status = "okay";
+	};
+
+	/*
+	 * ------------------------------------------------------------------
 	 * Internal Ethernet (M4)
 	 * ------------------------------------------------------------------
 	 * EN7523 has a Frame Engine (FE) + 2 QDMA blocks (PDMA/QDMA) + GDMP, and 3

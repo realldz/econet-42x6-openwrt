@@ -1,7 +1,7 @@
 diff --git a/target/linux/airoha/en7523/config-6.18 b/target/linux/airoha/en7523/config-6.18
 --- a/target/linux/airoha/en7523/config-6.18
 +++ b/target/linux/airoha/en7523/config-6.18
-@@ -317,3 +317,43 @@
+@@ -317,3 +317,52 @@
  CONFIG_ZSTD_COMMON=y
  CONFIG_ZSTD_COMPRESS=y
  CONFIG_ZSTD_DECOMPRESS=y
@@ -45,3 +45,15 @@ diff --git a/target/linux/airoha/en7523/config-6.18 b/target/linux/airoha/en7523
 +# CONFIG_PHY_AIROHA_AN7583_PCIE is not set
 +# CONFIG_PHY_AIROHA_USB is not set
 +# CONFIG_PHY_AIROHA_AN7583_USB is not set
++#
++# --- optical I2C bus (M3 step 1, 2026-10-08) --------------------------------
++# The stock firmware reads DDMI through the PON PHY block's internal I2C
++# master, while the community tree and the one public EN7523 port put the
++# EN7571 laser driver on the SoC's I2C0 (0x1fbf8000) at address 0x70.  The
++# controller needs patch 930-52 (adopted from airoha_en7523_all), which adds
++# the airoha_caps variant to i2c-mt7621.c, plus the i2c0 node in the board DTS.
++# Built-in (=y), not =m: a module would produce a kmod package that may not be
++# installed into the rootfs, and probe performs no bus transfers, so a dead or
++# unpopulated bus cannot hang the boot.  Looking for 0x70 stays a deliberate
++# act (`i2cdetect -y -r 0`, read mode only -- never write to the BOSA/laser).
++CONFIG_I2C_MT7621=y
