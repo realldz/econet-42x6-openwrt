@@ -12,7 +12,7 @@
  *                                     GLO_CFG +0x208, bang ring +0x300
  *   WFDMA0/PCIE1  tai BAR0 + 0xd8000 : cung layout (HIF thu hai)
  *
- * ⚠️⚠️ HAI HAZARD DA TRA GIA — doc ky truoc khi sua:
+ * !!!! HAI HAZARD DA TRA GIA -- doc ky truoc khi sua:
  *
  *  (1) DOC BAR0 KHI `PCI_COMMAND.MEMORY = 0` => TREO CUNG SoC VINH VIEN.
  *      EN7523 khong co completion timeout: readl() tren PCIe master-abort quay
