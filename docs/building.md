@@ -287,6 +287,14 @@ kernel unpacks to 13,158,560 bytes, and a kernel carrying an initramfs unpacks t
 persistent image is nearly twice the necessary size, and the image must not be
 flashed -- see [sysupgrade.md](sysupgrade.md).
 
+The same run counts `AIROHA-TRACE` breadcrumbs inside the unpacked kernel, and that
+count is the only cheap way to see them. They live in the lzma-compressed Image, so
+`grep` over the image file reports a clean build while the kernel goes on narrating
+every boot: the archived builds from the tracing session onward all carry 103 of
+them and print 122 lines, and a string scan over the files said zero. A count above
+zero means an instrumented `airoha_eth.c` went into the build; rebuild without it
+before shipping.
+
 To confirm that the device tree in this repository is the one that was actually
 compiled into an image:
 

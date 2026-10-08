@@ -88,6 +88,16 @@ print("kernel data   : offset 0x%X  size %d" % (kdata, ksize))
 
 img = lzma.decompress(buf[kdata:kdata + ksize], format=lzma.FORMAT_ALONE)
 print("Image unpacked: %d byte (0x%X)" % (len(img), len(img)))
+
+# Breadcrumb check. An instrumented airoha_eth.c leaves AIROHA-TRACE printk()s in
+# the kernel, which then narrate every boot. The strings live in the kernel Image,
+# which is lzma-compressed inside the FIT, so grepping the image file does not see
+# them -- that is how a build was once declared clean while all 21 archived images
+# still carried them. This line is the cheap way to tell.
+crumbs = img.count(b"AIROHA-TRACE")
+print("breadcrumbs   : %d AIROHA-TRACE string(s)%s"
+      % (crumbs, "  <-- INSTRUMENTED BUILD: rebuild before shipping" if crumbs else ""))
+
 first = struct.unpack("<I", img[:4])[0]
 print("first word    : 0x%08X (%s)" % (first, "bl -> ARM32 Image" if (first >> 24) == 0xEB else "?"))
 
