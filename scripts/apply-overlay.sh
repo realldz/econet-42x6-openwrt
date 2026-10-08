@@ -124,6 +124,29 @@ echo "    mt76 patches   package/kernel/mt76/patches/  (run: make package/kernel
 echo "    debug modules  package/kernel/{pciedbg,ringwatch}/  (built, not installed by default)"
 
 # ---------------------------------------------------------------------------
+# (2c) Stale patch check.  The copy above only adds and overwrites files; it
+#      never removes a patch that was applied by hand, and the build applies
+#      whatever it finds in that directory.  A leftover patch therefore rides
+#      along into every later build: one trace patch left in the tree once put
+#      122 lines of debug output into every boot of 21 consecutive images, and
+#      a string scan of the images did not show it because the kernel Image is
+#      compressed (docs/building.md).  Report anything the repo does not ship.
+# ---------------------------------------------------------------------------
+owns="$REPO/openwrt/overlay/target/linux/$TARGET/patches-$KERNEL_SERIES"
+stale=0
+for f in "$OWRT/target/linux/$TARGET/patches-$KERNEL_SERIES"/*.patch; do
+	[ -e "$f" ] || continue
+	if [ ! -e "$owns/$(basename "$f")" ]; then
+		echo "!! patch in the tree that this repo does not ship: $(basename "$f")" >&2
+		stale=1
+	fi
+done
+if [ "$stale" -eq 1 ]; then
+	echo "   Remove it if it is a leftover, or keep it and note why; the build" >&2
+	echo "   applies everything in that directory.  Verify the image afterwards." >&2
+fi
+
+# ---------------------------------------------------------------------------
 # (2b) Optional diagnostic mt76 patch.  Kept out of overlay/ on purpose: it
 #      prints the WFDMA descriptor base of every ring and must never end up in
 #      a shipped image.

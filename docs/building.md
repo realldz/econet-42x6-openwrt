@@ -97,6 +97,17 @@ make package/kernel/mt76/clean && make package/kernel/mt76/compile
 
 The same applies when you re-run `apply-overlay.sh` after editing an LED patch.
 
+**A patch that is already in the tree is never removed.** Step 2 only adds and
+overwrites files, so a patch applied by hand into
+`target/linux/airoha/patches-6.18/` stays there and is re-applied by every later
+build. `apply-overlay.sh` therefore ends by listing any patch in that directory
+that this repo does not ship, and the list is worth reading: a leftover trace
+patch is exactly how 21 consecutive images came to print 122 lines of
+`AIROHA-TRACE` on every boot while the source tree looked clean. Removing it
+changes the kernel and nothing else -- the squashfs region of that rebuild was
+byte-identical to the previous image, and the unpacked Image size stayed at
+13,158,560 bytes.
+
 ---
 
 ## 3. Kernel options: what is mandatory, and where it lives
