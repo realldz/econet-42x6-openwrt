@@ -1,0 +1,10 @@
+--- a/drivers/net/Makefile
++++ b/drivers/net/Makefile
+@@ -25,6 +25,7 @@
+ obj-$(CONFIG_NETCONSOLE) += netconsole.o
+ obj-$(CONFIG_NETKIT) += netkit.o
+ obj-y += phy/
++obj-y += optical/
+ obj-y += pse-pd/
+ obj-y += mdio/
+ obj-y += pcs/

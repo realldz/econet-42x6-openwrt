@@ -517,3 +517,95 @@ selected through a control register -- before the diagnostic area means anything
 and it must be done by a driver using this unit's own calibration blob, not by a manual poke. That is a
 deliberate stopping point for the read-only investigation: the next step is the `en7571` driver and its
 hwmon exposure, which is where those writes belong.
+
+## 14. M3 step 2: bringing up the `en7571` optical frontend driver (2026-10-09)
+
+Read-only probing is over: the frontend driver is the component that owns the BOSA from here on, and its
+bring-up path writes to the part. This section records what the port needs and the traps found while wiring it
+into the build.
+
+### 14.1 The driver is independent of the xPON MAC, so it can come first
+
+`drivers/net/optical/` (framework) plus `drivers/net/optical/airoha/` (`airoha_lddla` = core + `en7571_*`)
+build and register without any of the xPON stack: `lddla_frontend_register()` only needs the
+`optical_frontend` framework.
+
+* `OPTICAL_FRONTEND` (tristate) and, via the `OPTICAL_FRONTEND_HWMON` bool, the hwmon class exposure.
+* `AIROHA_LDDLA_PHY` (tristate, `depends on I2C`, `select FW_LOADER`, `select PHY_COMMON_PROPS`,
+  `select OPTICAL_FRONTEND`) with per-chip booleans `EN7570_PHY` / `EN7571_PHY` / `EN7572_PHY` / `GN25L95_PHY`.
+* `PHY_COMMON_PROPS` already exists in 6.18.54 (`drivers/phy/Kconfig:8`), so no Kconfig fix is needed.
+
+`probe()` reads `firmware-name` (default `airoha/en7571_bob.bin`), then runs `en7571_detect()` ->
+`lddla_bob_load()` -> `en7571_init()` -> `lddla_frontend_register()` -> a 1 Hz `tick_work`. Anything that fails
+before the frontend registration means "no DDMI", and `en7571_detect()` is the gate: it reads
+`EN7571_FT_ADC_CLK_CLR` and `EN7571_DUMMY` and requires `id1 == 0x03` and `id2 >= 0x03`. Both registers live
+above `0x7F`, i.e. outside the range that was probed by hand, so a mismatch would only show up in `dmesg` as
+`EN7571 silicon not found`.
+
+### 14.2 The BOB blob matches the format the driver parses
+
+`lddla_bob_load()` tries an nvmem cell named `calibration` first and falls back to the firmware file. The
+comment on the function states the magic lives at byte `0x94` of the image and identifies both the chip family
+and the 32-bit word endianness of the source. This unit's blob -- extracted from the factory block at absolute
+`0x6F00000 + 0x497`, which is *outside* the `reservearea` partition -- is 400 B and has `01 07 05 07` at
+`0x94`. So the file is used as-is, no re-packing, and no nvmem cell is declared. A missing BOB is non-fatal in
+the driver (it leaves an erased mirror) but a malformed or wrong-chip one is rejected.
+
+The blob is per-unit calibration data and is not published; it is installed into the image at
+`/lib/firmware/airoha/en7571_bob.bin`. `*.bin` is in `.gitignore`, so it cannot reach this repository by
+accident -- which is also why the exact bytes are not quoted here.
+
+### 14.3 Build traps hit while adding it
+
+1. **Two `drivers/net` hooks are needed.** `drivers/net/optical/**` is a new directory, so the framework is
+   invisible to the build until `drivers/net/Kconfig` sources it and `drivers/net/Makefile` descends into it,
+   even though `target/linux/<target>/files/` already contains the source (that overlay is copied *before*
+   patches are applied, which is why the files exist but nothing gets built). Handled by `930-53` (Kconfig) and
+   `930-54` (Makefile), one hunk each against upstream context.
+2. **`=m` kernel symbols need an explicit kmod package.** `CONFIG_I2C=m` in the target clamps
+   `AIROHA_LDDLA_PHY` to `=m`, and a bare `=m` symbol only produces a `.ko` inside the kernel tree -- no
+   package installs it into the rootfs. Both packages are declared in `target/linux/airoha/modules.mk`
+   (`kmod-optical-frontend`, `kmod-airoha-lddla`) and selected in `.config`. Without them the image still
+   builds "successfully" and ships without the driver.
+3. **An idempotence guard can silently swallow new packages.** The project's apply script appended
+   `modules.mk` only `if grep -q KernelPackage/i2c-mt7621` -- a condition that was already true from the
+   previous image, so the two new package blocks were never written and `make defconfig` then dropped the two
+   `CONFIG_PACKAGE_kmod-*` lines (surfacing as `PACKAGES_FAIL`, with the feed's pre-existing
+   `luci-app-weechat` / `squeezelite` recursion errors as decoys in the same output). The fix is to restore the
+   file from git and append the whole list again, so the step is idempotent *and* always current.
+
+### 14.4 Laser safety during bring-up
+
+The driver does not merely read: `en7571_init()` loads TX calibration data and a TX shutdown level, and the
+1 Hz tick runs an APC/compensation loop that writes bias values. The board's TX-disable line is GPIO16 in the
+stock LED map (`LED_PHY_TX_POWER_DISABLE`), and Linux does not claim it -- `/sys/kernel/debug/gpio` lists only
+gpio-0 (reset), gpio-1/6/10/27 (LEDs) and gpio-7 (WPS). Nothing in this DTS can therefore guarantee a dark
+laser; that rests on the BOSA's own power-up state and on the TX gate a PON MAC would drive, which this image
+does not have yet. Bring-up is done with the fibre unplugged and the port dark.
+
+### 14.5 Verified on hardware with img25 (2026-10-08) -- first DDMI that means something
+
+**Image:** `42X6_openwrt_6.18.54_img25_en7571_sysupgrade.bin` (9,437,473 B, md5 `a60bb3ecfc8ffaf42a1a045a9d2cc5ee`, sha256 `4bc52f9691179f75b52eb50357f7325d00fa74771c3efd82c9b1feeadf708926`). `SQFS_OFFSET = 3801088 = 0x3A0000` (FIT-SPLIT OK), 1214 squashfs entries. Offline `verify_img_sqfs.sh` already reported the payload before flashing: `optical_frontend.ko` (16,216 B), `airoha_lddla.ko` (40,660 B), `lib/firmware/airoha/en7571_bob.bin` 400 B md5 `61f90dec6a394f914bc6b56b7101e372` (per-unit blob, not in git), autoload entries `airoha-lddla` + `optical-frontend`, and no `airoha_xpon.ko` -- by design M3 step 2 is decoupled from xPON.
+
+Board was flashed over HTTP (`python -m http.server` on the PC, `uclient-fetch` on the board, sha256 checked) into `mtd3` (`tclinux_slave`) with overlay kept (no `-n`). Reboot in ~15 s (`Connection failed`/`rc=246` is normal). Slot A vendor `1.2.00.241216` untouched, overlay intact (`/dev/ubi0_0` + `overlayfs`, 12 files in `/etc/config`), WiFi `phy0-ap0` ESSID "OpenWrt", LEDs `blue:power=1`/`blue:inet=0`/`green:pon=0`/`red:los=0`, `AIROHA-TRACE` 0, load ~0.3, `dmesg` only the two known harmless lines.
+
+**Driver probe -- first try, success:**
+
+```
+[14.998071] en7571 0-0070: loaded 400-byte little-endian BOB from airoha/en7571_bob.bin: magic 0x07050701, chip-id 0x01, profile 0x07
+[15.223361] en7571 0-0070: EN7571 TxSD calibrated: offset=196 tiaflt=203 tiasd=180 pav_d=183 threshold=0x046
+[15.248782] en7571 0-0070: EN7571 initialised: GPON, rev 2, KT1, DDMI1
+```
+
+* `en7571_detect()` passed, so `id1 == 0x03`, `id2 >= 0x03` -- the two ID registers live above `0x7F`, hence invisible to the earlier hand probe, and no "EN7571 silicon not found". Chip is EN7571 rev 2.
+* 400 B little-endian BOB, magic `0x07050701` at byte `0x94` (the format `lddla_bob_import()` checks), chip-id `0x01`.
+* `TxSD calibrated` and `initialised: GPON, rev 2, KT1, DDMI1` -- APC/KT loop running, DDMI on.
+
+**Frontend + hwmon:**
+
+* `/sys/class/optical_frontend/frontend0` -- `present=1`, `ready=1`, `model=EN7571-LDDLA`, `vendor=Airoha`, `type=lddla`, `capabilities=0x47f`, `alarms=0x15` (the "min" alarms for bias/tx/rx while the laser is off).
+* `/sys/class/hwmon/hwmon0` (`name=en7571`): `temp1_input 41292 -> 42170` (41.3 C -> 42.2 C after 20 s, rising, so the BOSA is really being read), `in0_input 3263` mV (3.263 V, matches the 32622 the stock firmware reported for this unit within 0.4 mV at 0.1 mV units), `curr1_input 0`, `power1_input 0`, `power2_input 0` with `curr1_min_alarm`/`power*_min_alarm = 1` -- correct with the laser off and no fibre. Thresholds `temp1_max 85000`/`min -5000`, `in0 2900-3700 mV` look sane.
+* `i2cdetect` now shows `70: UU` and `i2cget 0x70` returns `Resource busy` -- correctly claimed by the driver.
+* `GPIO16` (TX-disable) is still unclaimed -- `/sys/kernel/debug/gpio` lists only gpio-0/1/6/7/10/27 -- so the dark state rests on the BOSA power-up and the PON MAC burst gate (not yet present). Fibre stays unplugged.
+
+The SFF-8472-shaped `0x60..0x7F` window that read all zero by hand now means something after init+BOB: temperature and voltage are readable and match the stock numbers. M3 step 2 is done; next is the xPON MAC/PCS/OMCI (M3 steps 3-4, `airoha_eth` + `pon_pcs` + `xpon`/`xpon_phy`).

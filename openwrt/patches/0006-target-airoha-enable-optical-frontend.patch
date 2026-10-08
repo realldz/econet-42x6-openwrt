@@ -1,0 +1,87 @@
+diff --git a/target/linux/airoha/en7523/config-6.18 b/target/linux/airoha/en7523/config-6.18
+index 7e8de1b..b9e8390 100644
+--- a/target/linux/airoha/en7523/config-6.18
++++ b/target/linux/airoha/en7523/config-6.18
+@@ -366,3 +366,26 @@ CONFIG_MEDIATEK_GE_SOC_PHY=y
+ # the airoha_caps variant to i2c-mt7621.c, plus the i2c0 node in the board DTS.
+ # Built-in (=y), not =m: a module would produce a kmod package that may not be
+ # installed into the rootfs, and probe performs no bus transfers, so a dead or
++
++# ---------------------------------------------------------------------------
++# Optical frontend (M3 step 2): framework + EN7571 laser-diode driver
++#
++# drivers/net/optical/** is not upstream, so the source comes from the project
++# overlay target/linux/airoha/files/ and patches 930-53 (drivers/net/Kconfig)
++# and 930-54 (drivers/net/Makefile) hook it into the build.  Without those two
++# hooks the files exist in the kernel tree but nothing is compiled.
++#
++# Kept at =m and not =y: CONFIG_I2C=m in this target clamps AIROHA_LDDLA_PHY
++# (which depends on I2C) to =m, and a =m symbol only reaches the rootfs when a
++# kmod package is declared for it -- see the two KernelPackage blocks below and
++# docs/pon-port.md section 14.3.  OPTICAL_FRONTEND_HWMON is a bool inside
++# optical_frontend.ko, so it needs no symbol of its own, only kmod-hwmon-core.
++# EN7570/EN7572/GN25L95 stay off: this board has an EN7571 only.
++# ---------------------------------------------------------------------------
++CONFIG_OPTICAL_FRONTEND=m
++CONFIG_OPTICAL_FRONTEND_HWMON=y
++CONFIG_AIROHA_LDDLA_PHY=m
++CONFIG_EN7571_PHY=y
++CONFIG_EN7570_PHY=n
++CONFIG_EN7572_PHY=n
++CONFIG_GN25L95_PHY=n
+diff --git a/target/linux/airoha/modules.mk b/target/linux/airoha/modules.mk
+index 9fa8a63..6120624 100644
+--- a/target/linux/airoha/modules.mk
++++ b/target/linux/airoha/modules.mk
+@@ -55,3 +55,51 @@ define KernelPackage/i2c-mt7621/description
+ endef
+ 
+ $(eval $(call KernelPackage,i2c-mt7621))
++
++# ---------------------------------------------------------------------------
++# Optical frontend (M3 step 2): kmod packages for the framework + EN7571 driver
++#
++# airoha_lddla.ko bundles airoha_lddla_core.o with en7571_{main,ddmi,txrx,adcloop}.o
++# (see drivers/net/optical/airoha/Makefile in the overlay) and registers itself
++# with the optical frontend framework.  It does not depend on xPON or airoha_eth,
++# so it can be brought up on its own -- which is why M3 step 2 comes before the
++# MAC and PCS work of step 3.
++# optical_frontend.ko also contains hwmon.c, because OPTICAL_FRONTEND_HWMON is a
++# bool, so that package needs +kmod-hwmon-core.
++# ---------------------------------------------------------------------------
++
++define KernelPackage/optical-frontend
++  SUBMENU:=$(OTHER_MENU)
++  TITLE:=Generic optical frontend core (xPON optics)
++  DEPENDS:=+kmod-hwmon-core
++  KCONFIG:=CONFIG_OPTICAL_FRONTEND
++  FILES:=$(LINUX_DIR)/drivers/net/optical/optical_frontend.ko
++  AUTOLOAD:=$(call AutoProbe,optical_frontend)
++endef
++
++define KernelPackage/optical-frontend/description
++ Generic provider/consumer framework for soldered optical frontends (laser-diode
++ drivers, limiting amplifiers, APD controllers) used by PON ports. The source
++ comes from the project overlay target/linux/airoha/files/drivers/net/optical/,
++ hooked in by patches 930-53 (Kconfig) and 930-54 (Makefile).
++endef
++
++$(eval $(call KernelPackage,optical-frontend))
++
++define KernelPackage/airoha-lddla
++  SUBMENU:=$(OTHER_MENU)
++  TITLE:=Airoha EN757x xPON optical frontend (LDDLA) driver
++  DEPENDS:=+kmod-optical-frontend +kmod-i2c-core
++  KCONFIG:=CONFIG_AIROHA_LDDLA_PHY
++  FILES:=$(LINUX_DIR)/drivers/net/optical/airoha/airoha_lddla.ko
++  AUTOLOAD:=$(call AutoProbe,airoha_lddla)
++endef
++
++define KernelPackage/airoha-lddla/description
++ Airoha EN7571 laser-diode driver / limiting amplifier as a provider of the
++ optical frontend framework. It loads the board BOB calibration from an nvmem
++ cell named "calibration", or from the firmware file named by the firmware-name
++ property (default airoha/en7571_bob.bin) when no such cell exists.
++endef
++
++$(eval $(call KernelPackage,airoha-lddla))

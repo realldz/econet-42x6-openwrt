@@ -70,7 +70,16 @@
 	 *   (patch 930-52, taken from the airoha_en7523_all branch).
 	 * - fixed 20 MHz clock, 100 kHz bus. No pinctrl: the I2C pads use the
 	 *   SoC defaults.
-	 * READ ONLY: never write to the BOSA/laser during this experiment.
+	 *
+	 * Address 0x70 was confirmed on real hardware (2026-10-08): an
+	 * `i2cdetect -y -r 0` scan answers at 0x70, so the EN7571 is on this bus
+	 * and the read-only probing phase is over. The child node below hands
+	 * the part to the optical frontend driver, which writes its bring-up
+	 * sequence and the board BOB calibration into the laser-diode driver.
+	 * Keep the fibre unplugged and the PON port dark while that driver is
+	 * brought up: the stock LED map calls this board's TX-disable line
+	 * GPIO16, and nothing in this DTS claims it, so the dark state rests on
+	 * the BOSA's own power-up state rather than on Linux.
 	 */
 	i2cclock: i2cclock@0 {
 		#clock-cells = <0>;
@@ -86,6 +95,26 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 		status = "okay";
+
+		/*
+		 * BOSA + EN7571 laser-diode driver / limiting amplifier.
+		 *
+		 * firmware-name points at this unit's own BOB calibration blob
+		 * (400 B, magic 0x07050701 at byte 0x94 -- the byte lddla_bob_import()
+		 * uses to identify both the chip family and the 32-bit word
+		 * endianness of the source). The file is installed at
+		 * /lib/firmware/airoha/en7571_bob.bin.
+		 *
+		 * Deliberately no nvmem-cells: the driver tries an nvmem cell named
+		 * "calibration" first and falls back to firmware-name when there is
+		 * none. Reading the BOB straight out of flash later would mean
+		 * pointing a cell at the factory block (BOB at 0x6F00000+0x497).
+		 */
+		en7571: lddla@70 {
+			compatible = "airoha,en7571";
+			reg = <0x70>;
+			firmware-name = "airoha/en7571_bob.bin";
+		};
 	};
 
 	/*
