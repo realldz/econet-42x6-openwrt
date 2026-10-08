@@ -484,3 +484,36 @@ as a fallback. Two things are worth carrying forward:
 Post-flash health, for the record: kernel 6.18.54, WiFi AP up on the MT7916 with the same `mt7915e.ko` and
 eeprom hashes as the previous image, overlay preserved, vendor slot A untouched (`1.2.00.241216`),
 AIROHA-TRACE count 0, and no new warnings in `dmesg`.
+
+### 13.5 Reading the DDMI registers read-only (2026-10-08): why the manual part stops here
+
+With approval, the diagnostic address range `0x00..0x7F` was read one register at a time. Each read is a
+register-address write followed by a data read; no data byte was ever written, and nothing at or above
+`0x80` (where the control and calibration registers of such devices live) was touched. The range is mostly
+zero with a handful of populated registers:
+
+```
+00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+10: 00 ff 0f 00 00 00 00 00 00 00 00 00 00 00 00 00
+20: 00 ff 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+30: 00 02 3f 00 00 00 00 00 00 00 00 00 00 00 00 00
+40: 96 02 b8 00 00 00 00 00 00 00 00 00 00 00 00 00
+50: (all zero)
+60: 00 00 5a 00 00 00 00 00 00 00 00 00 00 00 00 00
+70: 00 00 b4 00 00 00 00 00 00 00 00 00 00 00 00 00
+```
+
+Two conclusions:
+
+* The device is real and answers properly: it is not a stuck bus returning `0xff`, and the populated
+  registers (`0x11=ff`, `0x12=0f`, `0x21=ff`, `0x31=02`, `0x32=3f`, `0x40=96`, `0x42=b8`, `0x62=5a`,
+  `0x72=b4`) are a useful fingerprint to compare against the community `en7571` / `airoha_lddla` driver.
+* The layout is **not** an SFF-8472 diagnostic page: temperature, supply voltage and bias all read back as
+  zero across `0x60..0x7F`, and none of the values the vendor firmware reported for this unit (supply
+  voltage 32622, temperature 12214) appear anywhere in the range.
+
+The most likely explanation is that the EN7571 needs its BOB calibration loaded -- and possibly a page
+selected through a control register -- before the diagnostic area means anything. Loading the BOB is a write,
+and it must be done by a driver using this unit's own calibration blob, not by a manual poke. That is a
+deliberate stopping point for the read-only investigation: the next step is the `en7571` driver and its
+hwmon exposure, which is where those writes belong.
