@@ -261,7 +261,10 @@ through `/dev/i2c-*` (the device has no i2c-dev nodes). So the open question is 
 sits on that internal bus or on the SoC's `i2c0` (base `0x1fbf8000`; the EN7571 is at address
 `0x70` in the public notes for the same EN7523 + MT7916 + EN7571 combination). The device tree
 cannot be finalised until that is settled, and the polarity of the GPIO 16 TX-disable line has to
-be tried both ways -- see section 11.
+be tried both ways -- see section 11. As of 2026-10-08 there is an answer to prefer: the community
+drivers and the one public EN7523 write-up both put the EN7571 on the SoC `i2c0` as an ordinary I2C
+child, and neither uses the PHY-internal master. Section 12 records the sources, and what enabling
+that bus costs on this image.
 
 ## 10. Next step: four ordered jobs, each with an acceptance test
 
@@ -297,3 +300,61 @@ compile, a probe, or a link with an OLT -- three different levels of proof.
 * **Keep the redaction.** The GPON serial, the MAC addresses and the ISP identity are per-unit data
   and are not reproduced in this repository; use the placeholders described in
   [docs/README.md](README.md).
+
+## 12. Prior art: who has already built this (checked 2026-10-08)
+
+Section 10 does not change because of this section, but its *cost* does. Four independent projects
+cover most of the pieces, one of them is aimed at this SoC, and one covers this board. What no
+public source has is a GPON O5 state with OMCI on an **EN7523**: the two end-to-end successes are on
+sibling MIPS parts.
+
+| Project | Hardware | State (2026-10-08) | What it is worth here |
+|---|---|---|---|
+| [`Sirherobrine23/airoha_kernel`](https://github.com/Sirherobrine23/airoha_kernel), branch `airoha_en7523_all` | EN7523, EN7528, EN751221, EN7580 | Actively pushed (head `44641f1d`, 2026-10-08; ~33 commits newer than the `3c44110a` snapshot this document was measured against) | The source this port already uses: `net/xpon` with the in-kernel OMCI agent, `drivers/net/optical` (EN7570/71/72/73), `phy-airoha-xpon.c`. The author's own caveat, on the forum: "everything is still proof of concept at en7523". |
+| [`Sirherobrine23/openwrt`](https://github.com/Sirherobrine23/openwrt), branch `airoha_en7523` (`1b46c9c8`), posted as [openwrt PR #20104](https://github.com/openwrt/openwrt/pull/20104) | `airoha` target, EN7523 subtarget | Open, **draft**, 162 commits / 613 files, updated 2026-10-08 | An OpenWrt tree that already sets `CONFIG_XPON`, `CONFIG_XPON_OAM`, `CONFIG_XPON_OMCI` and `CONFIG_AIROHA_XPON_V1` for `en7523`, with ~66 board DTS. This is the Kconfig block and the DTS set to diff against. PR body: "very unstable for prodution, but working for testing". |
+| [openwrt PR #24577](https://github.com/openwrt/openwrt/pull/24577) (AKoo7) | EN7528 (MIPS), JCOW407 / DASAN H660GM-A | Open, 182 files, active 2026-10-08; claims **O5, full OMCI, PPPoE and LAN NAT on live fibre** | A second, independent end-to-end implementation with the same EN7571 front-end, plus a userspace `econet-omcid` and a LuCI status app. **Licence red flag:** one of the ported files carries an EcoNet header that reads "confidential and proprietary ... strictly prohibited", so that code is not usable as GPL -- read it for shape only. |
+| [`Cris7015/xr500v-openwrt`](https://github.com/Cris7015/xr500v-openwrt) | EN7526G / EN751221 (MIPS) | Release `v2026.10.07`: "O5, OMCI and PPPoE", tested end to end on a live line | The deepest public EN757x optics lab log (about 60 dated notes), and the idea of taking the ONU serial from the U-Boot environment (`gpon-serial-number`) instead of a partition. |
+| [`coolsnowwolf/lede`](https://github.com/coolsnowwolf/lede) commit `f7fd86e` | vendor kmods for EN7570/71/81, AN7583 | Package `package/kernel/airoha-pon`; one variant declares `DEPENDS+=@TARGET_airoha_en7523` | Vendor GPON drivers packaged for OpenWrt, with this target's name already in the dependency. Large amount of vendor code, no EN7523 runtime evidence, licence to be checked before any use. |
+| [`gilsonolegario/px3321-en7523-notes`](https://github.com/gilsonolegario/px3321-en7523-notes) | EN7523 + MT7916 + EN7571 (Zyxel PX3321-T1) | Docs only, last push 2026-09-02 | The only EN7523-specific xPON write-up: `en7571@70` on `i2c0`, the 400-byte BOB blob at `reservearea+0x140000`, `&xpon { gpon-serial-number = <&gponsn>; }`, and `/proc/xpon/ponInfo` field triage. Its own result: the MAC probes and the GTC/GEM counters tick, O1/O2 are reachable, "O3+ requires OLT + identity", "OMCI stack: not yet". |
+
+**No EN7523 has reached O5 in public.** The working reports are EN751221 and EN7528, both MIPS, and
+the "same-family EN7523 report" that PR #24577 alludes to is not public either. So everything this
+repository can borrow stops at "the pieces work on the sibling silicon" -- which is a much better
+place to start than a blank file, but it is not a finished port to copy.
+
+**Upstream moved on the day of this check.** John Crispin posted
+`[RFC net-next 00/12] net: add the PON subsystem`
+([lore](https://lore.kernel.org/netdev/20261008143249.3439762-1-john@phrozen.org/)) on 2026-10-08: a
+`net/pon` subsystem (not `net/xpon`), XGS-PON first, whose first driver is the AN7581 PON MAC and
+which depends on the still-unmerged Airoha PCS series, with a userspace
+[`pon-tool`](https://github.com/blogic/pon-tool) that its author says "reaches O5, passes traffic and
+recovers from fiber pulls against a production OLT". Mainline today has no `net/xpon`, no
+`drivers/net/optical` and no `pcs-airoha`. Two consequences for this port: keep the datapath behind
+an ordinary netdev, and do not invent a private `/proc` interface, because the ABI that is going to
+exist is `net/pon` plus `pon-tool`.
+
+### 12.1 The two open questions this answered
+
+* **Where the laser sits** (section 9). Both the community drivers and the one public EN7523 port put
+  the EN7571 on the **SoC `i2c0`** (`0x1fbf8000`) at address `0x70`, as an ordinary I2C child:
+  `&i2c0 { en7571: lddla@70 { compatible = "airoha,en7571"; reg = <0x70>; }; };`. That bus does not
+  exist in this image: the running device tree has no `i2c` node at all, the kernel is built with
+  `CONFIG_I2C=m` and `CONFIG_I2C_CHARDEV=m` only, `CONFIG_I2C_MT7621` is unset, and there is no
+  `/sys/class/i2c-adapter/` on the board. The community tree adds the compatible to
+  `drivers/i2c/busses/i2c-mt7621.c` (an `airoha_caps` struct and one match entry, about fifteen
+  lines). The vendor firmware's internal path through the PON PHY block stays the fallback.
+* **How wide the API gap is** (section 5). Re-measured today: the community `airoha_eth.h` is 4,988
+  lines against 801 here, `airoha_eth.c` is 10,871 against 4,700, and the header exports **20**
+  `airoha_eth_*xpon*()` entry points, not 17. The surface is still growing, which is the argument for
+  doing the shim once, keeping it small, and measuring it again before the next attempt.
+
+### 12.2 What to read first
+
+1. Sections 5 and 6 of this document -- the exact missing API list.
+2. The community `airoha_en7523_all` tree: `net/xpon/**` and `drivers/net/optical/**`.
+3. `target/linux/airoha/en7523/config-6.18` from the fork branch -- the Kconfig block, which this
+   repository already carries commented out with `# M1: tat PON` next to it.
+4. `px3321-en7523-notes`: `docs/gpon-next-steps.md` and `docs/optical-bob.md`, for the EN7523-specific
+   optics checks and the BOB calibration location.
+5. PR #24577's `econet-omcid` and `luci-app-econet-xpon`, read for shape rather than copied, and
+   Cris7015's `notes/` for what an EN757x bring-up actually looks like day by day.

@@ -125,6 +125,15 @@ Nothing optical has run, but the port is no longer unmapped `[not verified]`:
 * one real API drift was found and fixed on the way: the pcs-provider API changed
   between 6.18.44 and 6.18.54, so `pcs-en7523.c` needs
   `devm_fwnode_pcs_add_provider()` instead of `fwnode_pcs_add_provider()`.
+* the same check against the community tree as of 2026-10-08 puts the missing
+  surface at **20** `airoha_eth_*xpon*()` entry points, so that count is growing
+  rather than shrinking.
+
+Prior art, surveyed 2026-10-08: a second, independent implementation reaches GPON
+O5 with full OMCI and internet on **EN7528** (openwrt PR #24577, licence-encumbered
+in part), and a third does the same on **EN751221**; neither is EN7523, and no public
+source has reached O5 on this SoC. The survey, the reusable pieces and the upstream
+`net/pon` RFC are in [pon-port.md](pon-port.md) section 12.
 
 The stage 2 device tree overlay
 [`en7523-vgp42x6v1-pon.dtsi`](../openwrt/overlay/target/linux/airoha/dts/en7523-vgp42x6v1-pon.dtsi)

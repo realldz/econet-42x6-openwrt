@@ -50,6 +50,14 @@ branch `airoha_en7523_all`: the Ethernet series was adopted from it as `930-42` 
 `930-51`, and the xPON and optical sources in
 [`openwrt/pon/`](../openwrt/pon/README.md) come from the same tree.
 
+Two more references belong in the reading order before any xPON code is written: the EN7528
+end-to-end implementation in
+[openwrt PR #24577](https://github.com/openwrt/openwrt/pull/24577) (O5, OMCI and PPPoE on live
+fibre; its `econet-omcid` is the only open userspace OMCI agent, and one of its ported files is
+under a proprietary EcoNet header, so it is a reference and not a source), and the upstream
+[`net/pon` RFC](https://lore.kernel.org/netdev/20261008143249.3439762-1-john@phrozen.org/) posted
+2026-10-08. [pon-port.md](pon-port.md) section 12 is the survey and the list of reusable pieces.
+
 ## 1. The xPON and optical port (M3, then M4)
 
 **Why first.** This is the only item that makes the board what it is; everything
@@ -61,7 +69,8 @@ the community sources object by object against this kernel (6.18.54) gives **32 
 `drivers/net/optical/**` 15/15, `phy-airoha-xpon.c` and `pcs-en7523.c`. The two
 failures (`airoha_xpon.o`, `airoha_gpon_omci.o`) fail **only** on `airoha_eth.h`:
 the community and OpenWrt `airoha_eth` drivers have diverged, and 17
-`airoha_eth_*xpon*()` hooks plus a set of types/enums and macros are missing.
+`airoha_eth_*xpon*()` hooks plus a set of types/enums and macros are missing (20 hooks in the
+community header as of 2026-10-08, so the count is still growing).
 Neither shortcut works -- the community header is not a superset (it breaks
 `airoha_eth.c` and `airoha_ppe.c`), and that driver wholesale compiles only 4 of its
 10 objects. One real API drift is already fixed: pcs-provider changed between 6.18.44

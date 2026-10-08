@@ -177,5 +177,12 @@ the trailing raw region of the SPI-NAND - see [docs/hardware.md](../../docs/hard
 | 6 minimal hook patches (net x2, drivers/net x2, airoha Kconfig/Makefile x2) | 5 of 6 - `git apply --check` OK on vanilla Linux v6.18, but `032` was measured **not** to apply to the prepared tree (`Kconfig.rej`) |
 | "Whole-file" diff of the community tree | no - **rejected**: the community tree is not vanilla 6.18 (it adds `ETHERNET_PACKET_MANGLE`, `FWNODE_PCS`, `PCS_MTK_USXGMII`, `RFKILL_FULL`, and rewrites the airoha Kconfig) => kept in `reference/` as evidence |
 | `drivers/net/pcs/airoha` + reset bindings | yes by OpenWrt/`930-46`; the community `pcs-en7523.c` needs its PCS-provider API updated for 6.18.54 (done, see docs/pon-port.md section 4) |
-| `airoha_eth.c` hooks (17 APIs), `pon` pinmux | no - not ported; this is the remaining work |
+| `airoha_eth.c` hooks (17 APIs), `pon` pinmux | no - not ported; this is the remaining work (20 APIs in the community header as of 2026-10-08) |
 | Anything linked, loaded, probed or run on the device | **no - nothing at all** |
+
+The laser bus question in section 4 is settled by the community sources and the one public EN7523
+port: the `en7571` is an ordinary I2C child at address `0x70` on the SoC `i2c0` (`0x1fbf8000`),
+which this image does not have yet (no `i2c` node, `CONFIG_I2C_MT7621` unset); the community patch
+is about fifteen lines in `drivers/i2c/busses/i2c-mt7621.c`. Survey of the prior art, including the
+EN7528 end-to-end implementation and the upstream `net/pon` RFC of 2026-10-08:
+[docs/pon-port.md](../../docs/pon-port.md) section 12.
