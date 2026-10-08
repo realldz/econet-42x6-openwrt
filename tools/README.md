@@ -22,6 +22,7 @@ root, for example `python tools/ub_uart.py peek --sec 5`.
 | `tools/ub_paste.py` | Paste one small file into the running target's tmpfs over the console with `printf` octal escapes, for targets that have no /dev/mtd*, /dev/mem, /proc/kcore, base64, uudecode or xxd. |
 | `tools/ub_cc.py` | Escape a stuck U-Boot secondary prompt (`PS2 '> '`) with repeated Ctrl-C, or reboot a live Linux through SysRq. |
 | `tools/verify_build.py` | Verify that a built image's FIT load/entry address matches the kernel `_text` link address (it must be `0x80208000`). |
+| `tools/dts_vs_image.py` | Offline: check that a `.dts` in this repository is the one that was compiled into an image. Parses the DTB out of the FIT without `dtc` and compares every node and property the `.dts` declares, cell by cell, so a board file that drifted from the build is caught instead of believed. |
 | `tools/mt7916_eeprom_mac.py` | Write your unit's MAC into the MT7916 default eeprom blob, so the driver stops using a random address every boot. Inspect-only with `--show`. |
 
 ## Serial port and baud rate
@@ -45,6 +46,8 @@ export UB_PASSWORD=<see docs/booting.md>
 
 `verify_build.py` has no command-line parser: pass the image as its single argument,
 `python3 tools/verify_build.py <image>` (this is what the top-level README documents).
+`dts_vs_image.py` takes the image, the board `.dts` and the `.dtsi` files it includes,
+and needs no OpenWrt tree of its own beyond those files.
 
 ## ub_uart.py sub-commands
 

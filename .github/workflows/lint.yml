@@ -1,8 +1,8 @@
 name: lint
 
 # Cheap checks that catch the classes of mistake this repository is actually
-# prone to: a Vietnamese comment creeping back in, CRLF line endings destroying
-# a patch file, or a malformed unified diff.
+# prone to: CRLF line endings destroying a patch file, a malformed unified diff,
+# a shell or Python file that does not even parse.
 
 on:
   push:
@@ -32,10 +32,20 @@ jobs:
       - name: Python syntax
         run: |
           set -e
+          # `cmd && echo` inside a while loop does NOT fail the step: `set -e`
+          # ignores a command that is part of a && list unless it is the last
+          # one.  Collect failures and exit on them explicitly instead.
+          fail=0
           while IFS= read -r f; do
-            python3 -m py_compile "$f" && echo "ok   $f"
+            if python3 -m py_compile "$f"; then
+              echo "ok   $f"
+            else
+              echo "FAIL $f"
+              fail=1
+            fi
           done < <(git ls-files '*.py')
           find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+          exit $fail
 
       - name: ShellCheck
         run: |
@@ -47,9 +57,16 @@ jobs:
       - name: Patches are well-formed unified diffs
         run: |
           set -e
+          fail=0
           while IFS= read -r p; do
-            git apply --stat "$p" >/dev/null && echo "ok   $p"
+            if git apply --stat "$p" >/dev/null; then
+              echo "ok   $p"
+            else
+              echo "FAIL $p"
+              fail=1
+            fi
           done < <(git ls-files '*.patch')
+          exit $fail
 
       - name: No CRLF line endings
         run: |
@@ -61,20 +78,18 @@ jobs:
           fi
           echo "ok: all files are LF"
 
-      - name: ASCII only in source and docs
+      - name: Report non-ASCII files (advisory)
         run: |
-          set -e
-          # The point is to keep Vietnamese comments out of the repository, which
-          # is English-only. Binary assets are excluded by extension.
-          # The last four globs cover files with no extension or an unusual one:
-          # board.d/02_network, the uci-defaults scripts, *.append, *.example.
-          fail=0
+          # Advisory only.  The board-support sources carry a few Vietnamese
+          # comments and the odd emoji, which is fine -- what this must catch is
+          # an *encoding* accident, such as a UTF-8 comment pasted into a file
+          # that git then normalises, or a stray BOM.  It scans every tracked
+          # file rather than a list of extensions: that list missed the three
+          # nested Makefiles of the diagnostic modules, LICENSE, .gitattributes
+          # and every .c file, which is exactly where this would hide.
           while IFS= read -r f; do
             if LC_ALL=C grep -qP '[^\x00-\x7F]' "$f"; then
-              echo "NON-ASCII: $f"
-              LC_ALL=C grep -nP '[^\x00-\x7F]' "$f" | head -5
-              fail=1
+              echo "non-ASCII: $f"
+              LC_ALL=C grep -nP '[^\x00-\x7F]' "$f" | head -3
             fi
-          done < <(git ls-files '*.sh' '*.py' '*.md' '*.dts' '*.dtsi' '*.patch' '*.mk' '*.env' '*.yml' '*.yaml' '*.txt' 'Makefile' \
-                     '*.append' '*.example' '*/board.d/*' '*/uci-defaults/*')
-          exit $fail
+          done < <(git ls-files)

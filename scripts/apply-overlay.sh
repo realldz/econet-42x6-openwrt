@@ -38,7 +38,7 @@ for arg in "$@"; do
 	case "$arg" in
 		--with-pon) WITH_PON=1 ;;
 		--with-mt76-debug) WITH_MT76_DEBUG=1 ;;
-		-h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+		-h|--help) sed -n '2,25p' "$0"; exit 0 ;;
 		-*) echo "!! unknown option: $arg" >&2; exit 2 ;;
 		*) OWRT_ARG="$arg" ;;
 	esac

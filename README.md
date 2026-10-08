@@ -252,7 +252,7 @@ openwrt/
   optional-configs/ example files you can opt into, e.g. a pinned wireless config
 scripts/            pin.env, apply-overlay.sh, build-firmware.sh, packages.append
 imagebuilder/       build-image.sh + package list + first-boot overlay
-tools/              UART / YMODEM / console-paste / image-verify / eeprom-MAC helpers
+tools/              UART / YMODEM / console-paste / image-verify / DTS-vs-image / eeprom-MAC helpers
 docs/               hardware, Ethernet, LEDs, sysupgrade, PON and build documentation
 ```
 

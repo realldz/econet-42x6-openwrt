@@ -145,6 +145,14 @@ read back the same value (`0x106`), so the second window is not a separate regis
 block. The driver still probes and both NAPI instances are created; nothing in the
 log ties that overlap to a failure.
 
+Every node and value above can be checked against a real image rather than taken on
+trust: [`tools/dts_vs_image.py`](../tools/dts_vs_image.py) pulls the DTB out of a
+`*-sysupgrade.bin` without `dtc` and compares it with
+[`en7523-vgp42x6v1.dts`](../openwrt/overlay/target/linux/airoha/dts/en7523-vgp42x6v1.dts),
+cell by cell. On the recorded image it reports all 129 declared properties present,
+the two `/delete-node/` directives honoured (no `gpio@1fbf0200`, no `gpio@1fbf0270`),
+and exactly one difference -- `mac-address`, which is redacted here.
+
 ## 4. Kernel options
 
 The Ethernet options live in the subtarget's `config-6.18`:

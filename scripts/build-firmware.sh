@@ -232,11 +232,19 @@ fi
 # The persistent image must carry the PLAIN kernel.  When the same tree also
 # builds an initramfs image (--initramfs, on by default), the kernel can end up
 # with the initramfs cpio embedded in it, and the sysupgrade image inherits that:
-# MEASURED 14,418,209 B with the squashfs at 0x880000, instead of 9,437,473 B
-# with the squashfs at 0x3A0000.  Such an image still boots, so nothing fails --
-# it is just far larger than it needs to be, and IMAGE_SIZE is not set on this
-# target, so an oversized image is truncated at flash time rather than rejected.
-# See docs/sysupgrade.md.
+# MEASURED 14,418,209 B with the squashfs at 0x880000, and a second one at
+# 12,058,913 B with the squashfs at 0x760000, instead of 9,437,473 B with the
+# squashfs at 0x3A0000.  The two kernel Images of that build had the same md5,
+# which is what identifies it.
+#
+# What the check measures: `mtdsplit_fit` derives the kernel partition as
+# round_up(FIT totalsize, erase block) and then finds the rootfs by scanning for
+# a filesystem magic *after* the FIT, so the squashfs offset is exactly
+# round_up(totalsize) -- 0x3A0000 for a clean build here.  An offset far past
+# that means the FIT itself grew, i.e. the kernel carries the initramfs.
+# Why it matters: the image is much larger than it needs to be, and such a
+# kernel boots its own embedded rootfs rather than the flash rootfs, so nothing
+# persists across a reboot [not verified on this board, docs/sysupgrade.md].
 # ---------------------------------------------------------------------------
 if command -v python3 >/dev/null 2>&1; then
 	echo
@@ -244,26 +252,66 @@ if command -v python3 >/dev/null 2>&1; then
 	for img in "$BIN"/*-sysupgrade.bin; do
 		[ -e "$img" ] || continue
 		python3 - "$img" <<'PY'
-import os, sys
+import os, struct, sys
+
+SQUASHFS_MAGIC = b"hsqs"
+COMPRESSIONS = {1, 2, 3, 4, 5, 6}   # gzip, lzma, lzo, xz, lz4, zstd
+
+
+def plausible_superblock(data, off):
+	"""True when a squashfs v4 superblock starts at `off`.
+
+	Checking the magic alone is not enough: the kernel Image is uncompressed,
+	so a stray 'hsqs' in it would be reported as the rootfs offset and hide an
+	inflated kernel.
+	"""
+	size = len(data)
+	if off < 0 or off + 96 > size or data[off:off + 4] != SQUASHFS_MAGIC:
+		return False
+	block_size, = struct.unpack_from("<I", data, off + 12)
+	compression, = struct.unpack_from("<H", data, off + 20)
+	block_log, = struct.unpack_from("<H", data, off + 22)
+	major, = struct.unpack_from("<H", data, off + 28)
+	bytes_used, = struct.unpack_from("<Q", data, off + 40)
+	if major != 4 or compression not in COMPRESSIONS:
+		return False
+	if block_size < 4096 or block_size > (1 << 20) or block_size & (block_size - 1):
+		return False
+	if block_log != block_size.bit_length() - 1:
+		return False
+	return bytes_used <= size - off
+
+
+def find_rootfs(data):
+	offs = []
+	i = data.find(SQUASHFS_MAGIC)
+	while i >= 0:
+		if plausible_superblock(data, i):
+			offs.append(i)
+		i = data.find(SQUASHFS_MAGIC, i + 1)
+	return offs
+
 
 path = sys.argv[1]
-data = open(path, 'rb').read()
+data = open(path, "rb").read()
 size = len(data)
+offs = find_rootfs(data)
 
-# The squashfs starts at the kernel load + pad boundary; 0x3A0000 (3.6 MiB) is
-# what this board's profile produces.  Anything past ~6 MiB means the kernel is
-# carrying an embedded initramfs.
-off = data.find(b'hsqs')
-print(f"    {os.path.basename(path)}: {size} bytes", end='')
-if off < 0:
-    print(" -- no squashfs found, is this really a sysupgrade image?")
-elif off > 0x600000:
-    print(f", squashfs at 0x{off:x}  <-- WARNING: kernel looks like it has the "
-          "initramfs embedded")
-    print("       rebuild without --initramfs if you want a lean persistent "
-          "image (see docs/sysupgrade.md)")
+print(f"    {os.path.basename(path)}: {size} bytes", end="")
+if not offs:
+	print(" -- no squashfs superblock found, is this really a sysupgrade image?")
+elif offs[0] > 0x600000:
+	print(f", squashfs at 0x{offs[0]:x}  <-- WARNING: kernel looks like it has "
+	      "the initramfs embedded")
+	print("       the FIT grew, so this image is far larger than it needs to be "
+	      "-- rebuild without")
+	print("       --initramfs for a lean persistent image (see docs/sysupgrade.md)")
 else:
-    print(f", squashfs at 0x{off:x}  ok")
+	print(f", squashfs at 0x{offs[0]:x}  ok", end="")
+	if len(offs) > 1:
+		print(f"  ({len(offs)} candidate offsets, using the first)")
+	else:
+		print()
 PY
 	done
 fi

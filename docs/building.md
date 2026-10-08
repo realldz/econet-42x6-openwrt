@@ -215,20 +215,23 @@ and no web UI while the build reports success.
 With `CONFIG_TARGET_ROOTFS_INITRAMFS=y` (the default), the kernel can end up with
 the initramfs cpio embedded in it, and `*-sysupgrade.bin` inherits that kernel:
 **MEASURED 14,418,209 B with the squashfs at `0x880000`**, against 9,437,473 B with
-the squashfs at `0x3A0000` for a clean build. The large image still boots, so the
-mistake is silent -- and since this target sets no `IMAGE_SIZE`, an image that
-outgrows slot B is truncated at flash time rather than refused at build time.
-`build-firmware.sh` therefore prints the squashfs offset of every sysupgrade image
-and warns when it looks like an initramfs kernel. Build with `--no-initramfs` when
-you only want the persistent image, and check with
-[sysupgrade.md](sysupgrade.md), "verify a build before flashing it".
+the squashfs at `0x3A0000` for a clean build (a second instance of the same bug was
+12,058,913 B at `0x760000`, with `Image` and `Image-initramfs` sharing an md5).
+The build succeeds either way, which is what makes the mistake silent: an inflated
+kernel means a larger derived kernel partition, so the split still mounts -- the
+damage is a needlessly huge image whose kernel boots its own embedded rootfs rather
+than the flash rootfs, so nothing would persist `[not verified]`. `build-firmware.sh`
+therefore validates the squashfs superblock of every sysupgrade image and warns when
+the offset shows an inflated kernel. Build with `--no-initramfs` when you only want
+the persistent image, and check with [sysupgrade.md](sysupgrade.md), "verify a build
+before flashing it".
 
 The whole image also has to stay inside slot B, **`0x2800000` (41,943,040 bytes)**,
-and nothing enforces that at build time yet: the device profile sets no
-`IMAGE_SIZE`, so an image that outgrows the slot is truncated at flash time instead
-of being refused. Current images are 9,437,473 bytes, so there is plenty of room --
-but a package set that doubles it would fail quietly. Setting
-`IMAGE_SIZE := 0x2800000` fixes that and needs one build to confirm.
+and nothing enforces that at build time: the device profile sets no `IMAGE_SIZE`, so
+an image that outgrows the slot is truncated at flash time instead of being refused.
+Current images are 9,437,473 bytes, so there is plenty of room -- but a package set
+that quadruples it would fail quietly. Setting `IMAGE_SIZE := 0x2800000` fixes that
+and needs one build to confirm `[not verified]`.
 
 **Then stop building from source.** The Image Builder produced here carries the
 already-patched kernel and the whole package set, which is what you want for
@@ -277,6 +280,32 @@ python3 tools/verify_build.py bin/targets/airoha/en7523/*-initramfs-kernel.bin
 It checks that the FIT load/entry address is `0x80208000`. Getting that wrong
 produces a kernel that deadloops before it can print, so the only symptom is a
 completely silent UART. See [booting.md](booting.md).
+
+It also prints `Image unpacked:`, which is the other half of the check: a plain
+kernel unpacks to 13,158,560 bytes, and a kernel carrying an initramfs unpacks to
+25,741,472. The second number means the build mixed the two kernel variants, the
+persistent image is nearly twice the necessary size, and the image must not be
+flashed -- see [sysupgrade.md](sysupgrade.md).
+
+To confirm that the device tree in this repository is the one that was actually
+compiled into an image:
+
+```bash
+python3 tools/dts_vs_image.py bin/targets/airoha/en7523/*-sysupgrade.bin \
+    openwrt/overlay/target/linux/airoha/dts/en7523-vgp42x6v1.dts \
+    <openwrt>/target/linux/airoha/dts/en7523.dtsi
+```
+
+It parses the DTB out of the FIT without `dtc` and compares every node and
+property the `.dts` declares, cell by cell (macro-valued cells such as
+`GPIO_ACTIVE_LOW` are wildcards because the binding headers are not available to
+it). The `.dtsi` argument is only needed to resolve `&label` to a node path; it
+comes from the OpenWrt tree, so pass the same revision you built against.
+Expected output on an unmodified pair: every node and property present, and
+exactly one difference, `mac-address`, because this repository ships a
+placeholder instead of the per-unit address. Anything else -- a missing node, a
+missing property, a different GPIO number, a phandle pointing at the wrong
+label -- means the `.dts` and the image have drifted apart.
 
 ---
 

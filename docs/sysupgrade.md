@@ -249,26 +249,50 @@ For this board's layout a sysupgrade image must satisfy:
 | Property | Value | Why |
 |---|---|---|
 | FIT magic at offset 0 | `d0 0d fe ed` | the bootloader and `mtdsplit_fit` expect a FIT header at the start of slot B |
-| squashfs superblock | `hsqs` at **`0x3A0000`** (3,801,088), never beyond it | `0x3A0000` is the size of the derived `kernel` partition (mtd4); the rootfs begins where it ends |
+| squashfs superblock | `hsqs` at **`0x3A0000`** (3,801,088) for this package set | that offset *is* the size of the derived `kernel` partition (mtd4), so it moves with the FIT, not with the package set -- see the explanation below for what a much larger value means |
 | image size | 9,437,473 bytes (`0x900001`) for the current package set | kernel + squashfs + trailer; another package set changes it, the offset above does not |
 | FIT `load` / `entry` | `0x80208000` | anything else deadloops in `head.S` with a silent UART -- check with [`tools/verify_build.py`](../tools/verify_build.py) |
 | whole-image size | must stay under slot B, `0x2800000` (41,943,040 bytes) | **nothing enforces this at build time yet**: the device definition sets no `IMAGE_SIZE`, so an oversized image is truncated at flash time rather than refused at build time. Current images are 9,437,473 bytes, well inside; adding `IMAGE_SIZE := 0x2800000` to the device profile in `openwrt/patches/0002-*.patch` is the fix, and it needs one build to confirm before it can be trusted `[not verified]` |
 
-`0x3A0000` comes from `mtdsplit_fit`: it takes the FIT's `totalsize` and rounds it **up to the
-erase-block size** (128 KiB, `0x20000`) to get the `kernel` partition, and the `rootfs` partition is
-everything after that. One measured image had `totalsize = 0x3831C4`, which rounds up to `0x3A0000`,
-so `hsqs` sits exactly there. If the FIT grows past `0x3A0000`, the rootfs is pushed into the `kernel`
-partition's space and the split yields a rootfs that does not mount. That is not hypothetical: a build
-with `CONFIG_TARGET_ROOTFS_INITRAMFS=y` plus `CONFIG_TARGET_INITRAMFS_COMPRESSION_NONE=y` embedded an
-uncompressed initramfs into the kernel `Image` and produced **14,418,209 bytes** with `hsqs` at
-**`0x880000`** (kernel 8.80 MB instead of 3.76 MB -- same lzma, same DTB); it must not be flashed.
-Clearing `CONFIG_TARGET_ROOTFS_INITRAMFS` brought it back to 9,437,473 bytes with `hsqs` at `0x3A0000`.
-Note that [`scripts/build-firmware.sh`](../scripts/build-firmware.sh) *adds* that symbol for
-`--initramfs` (the default) and never removes it, so a stale `=y` survives a later `--no-initramfs`.
+`0x3A0000` comes from `mtdsplit_fit` (`target/linux/generic/files/drivers/mtd/mtdsplit/mtdsplit_fit.c`
+at the pinned revision): it reads the FIT's `totalsize` and rounds it **up to the erase-block size**
+(128 KiB, `0x20000`) to size the `kernel` partition, then finds the `rootfs` partition by scanning for
+a filesystem magic *after* the FIT. One measured image had `totalsize = 0x3831C4`, which rounds up to
+`0x3A0000`, so `hsqs` sits exactly there -- the offset is a property of the kernel, and a different
+package set does not move it (that changes the image size, not the kernel).
+
+**What a grown FIT does *not* break.** The `kernel` partition is computed from the image, not declared
+anywhere, so a bigger FIT does not push the rootfs into the kernel's space: the kernel partition simply
+grows, the scan still finds the squashfs after it, and the split still mounts. Do not repeat the stricter
+claim that a large offset alone makes the rootfs unmountable -- that was wrong, and the source above is
+what settles it.
+
+**What it does mean.** An offset far above 3.6 MiB says the FIT itself grew, and the usual cause is a
+kernel with an initramfs embedded in it:
+
+* a build with `CONFIG_TARGET_ROOTFS_INITRAMFS=y` plus `CONFIG_TARGET_INITRAMFS_COMPRESSION_NONE=y`
+  embedded an uncompressed initramfs into the kernel `Image` and produced **14,418,209 bytes** with
+  `hsqs` at **`0x880000`** (kernel 8.80 MB instead of 3.76 MB -- same lzma, same DTB);
+* the same mistake was caught earlier in a **12,058,913-byte** image with `hsqs` at **`0x760000`**, where
+  `arch/arm/boot/Image` and `Image-initramfs` had the *same* md5 and the same size -- that equality is
+  the fingerprint of this bug, and the build log's kernel-1 `Data Size` (7,678,098 instead of ~3,757,000)
+  shows it too.
+
+Such an image must not be flashed, but for the right reason: it is not the persistent image. It is nearly
+twice the necessary size, and the kernel it carries boots its own embedded rootfs instead of the flash
+rootfs, so nothing would persist across a reboot `[not verified]` -- it was never flashed here; what *was*
+measured is the size, the offset and the identical kernel md5s.
+
+Clearing `CONFIG_TARGET_ROOTFS_INITRAMFS` brought the image back to 9,437,473 bytes with `hsqs` at
+`0x3A0000`. Note that [`scripts/build-firmware.sh`](../scripts/build-firmware.sh) *adds* that symbol for
+`--initramfs` (the default) and never removes it, so a stale `=y` survives a later `--no-initramfs`. The
+script now checks every sysupgrade image it produced and prints the offset it found: it validates the
+**squashfs superblock** at each `hsqs` it sees and not just the magic, because the kernel `Image` here is
+uncompressed and a stray `hsqs` inside it would otherwise mask an inflated kernel.
 
 ```sh
-grep -abo hsqs image.bin | head -1       # GNU grep; must print 3801088 (= 0x3A0000)
 python3 tools/verify_build.py <image>    # FIT load/entry against the kernel's _text link
+grep -abo hsqs image.bin | head -1       # GNU grep; 3801088 (= 0x3A0000) for a clean build
 ```
 
 ## 9. Proven, and not proven
