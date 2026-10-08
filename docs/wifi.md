@@ -647,10 +647,13 @@ These are stated plainly rather than glossed over.
   driver uses the generic default blob with the unit's MAC written into it: that
   ends the random address, it does not make the radio per-unit calibrated.
 
-- **No measured throughput.** A real client associated over the air on 5 GHz and
-  moved roughly 300 MB (section 10), but the rate figures available are the
-  driver's own estimates -- there was no iperf3 peer -- so there is no measured
-  throughput number for this board.
+- **Throughput is only an acceptance figure.** A real client associated over the air
+  on 5 GHz and moved roughly 300 MB (section 10); the owner later measured
+  end-to-end throughput peaking at **200-400 Mbit/s** `[hardware]`, but the runs'
+  direction, client and tool were not recorded and there was no iperf3 peer, so
+  this is not a benchmark `[not verified]`. It sits far below the driver's own
+  864.8 Mbit/s rate estimate, so the datapath has room to improve; see
+  [roadmap.md](roadmap.md) section 7.
 
 ## 9. Regulatory settings and transmit power
 
@@ -691,10 +694,14 @@ Association at HE-MCS8, 80 MHz, 2 spatial streams on channel 36, with about 300 
 direction -- real traffic, not beacons. The board answered `ping` from the client (2/2, 2.9-4.6 ms),
 and a **wired** host pinging the client got **10/10 replies at 3-4 ms, 0 % loss** with a resolved ARP
 entry, so the path was host -> cable -> switch port -> `br-lan` -> `phy1-ap0` -> air -> client. That
-hop is what proves the radio path end to end. Two caveats: the 864.8 MBit/s figure is the driver's
-rate estimate, not a measured throughput (there was no iperf3 peer), and the AP was seen advertising
+hop is what proves the radio path end to end. Three caveats: the 864.8 MBit/s figure is the driver's
+rate estimate, not a measured throughput (there was no iperf3 peer) -- the owner's later
+acceptance runs peaked at 200-400 Mbit/s real throughput `[hardware]`, which is the number to
+work from; the AP was seen advertising
 160 MHz while the VN entry allows 80 MHz in that band -- the link worked, but pinning `htmode HE80`
-is the safer configuration until that is understood.
+is the safer configuration until that is understood; and the 200-400 Mbit/s figure itself needs a
+proper re-measurement `[not verified]`, because neither the direction nor the tool of those runs was
+recorded.
 
 ## 11. Default configuration policy
 

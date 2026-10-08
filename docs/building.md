@@ -223,6 +223,13 @@ and warns when it looks like an initramfs kernel. Build with `--no-initramfs` wh
 you only want the persistent image, and check with
 [sysupgrade.md](sysupgrade.md), "verify a build before flashing it".
 
+The whole image also has to stay inside slot B, **`0x2800000` (41,943,040 bytes)**,
+and nothing enforces that at build time yet: the device profile sets no
+`IMAGE_SIZE`, so an image that outgrows the slot is truncated at flash time instead
+of being refused. Current images are 9,437,473 bytes, so there is plenty of room --
+but a package set that doubles it would fail quietly. Setting
+`IMAGE_SIZE := 0x2800000` fixes that and needs one build to confirm.
+
 **Then stop building from source.** The Image Builder produced here carries the
 already-patched kernel and the whole package set, which is what you want for
 every image after the first; it is the recommended path for day-to-day work. See

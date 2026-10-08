@@ -42,3 +42,19 @@ make image PROFILE=econet_vgp-42x6v1 PACKAGES="luci luci-ssl"
 The profile name is `econet_vgp-42x6v1`. Run `make info` inside the extracted
 directory to list the profiles and packages your tarball actually contains --
 useful when you are not sure whether a package was built.
+
+## Before you publish an image
+
+Two per-unit things end up inside a built image, and both identify the unit that
+built it:
+
+* the eeprom blob in `files/`, once you have written your MAC into it (above), and
+* the base MAC compiled into the device tree, if you set one there instead of
+  leaving the `mac-address` placeholder.
+
+An image built that way is fine for the unit it was made for, but it is not
+something to hand out: it carries that unit's address. The repository ships the
+placeholder (`mac-address = [02 00 00 00 00 00]`) and no eeprom blob for exactly
+this reason -- each owner runs
+[`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py) against their own
+board, so no two published images share an identity.

@@ -44,6 +44,13 @@ were demonstrated on the board:
 | **Wi-Fi up** | Both MT7916 radios come up and carry traffic to a real client over the air. The driver reports 864.8 Mbit/s Tx at HE-MCS 8, 80 MHz, 2 spatial streams -- that is the `station dump` rate estimate, not an `iperf3` result; no `iperf3` peer was set up. The path was host -> cable -> `lan4` -> `br-lan` -> `phy1-ap0` -> client. The AP interfaces are `phy0-ap0` / `phy1-ap0` (not `wlan0`), and both are members of `br-lan`. LuCI runs on `ucode` and serves its login page; `apk` works after the generic feeds are added. Detail: [wifi.md](wifi.md). |
 | **Reboot keeps config** | `sysupgrade` runs on the board: it unlocks and writes slot B (`tclinux_slave`, mtd3) block by block, reboots, and the board comes back on the image it just wrote. Slot A is untouched, the overlay survives, and `/etc/config` plus marker files were intact after the upgrade. Detail: [sysupgrade.md](sysupgrade.md). |
 
+**Measured throughput `[hardware]`, not yet good.** End-to-end throughput was measured by the owner during acceptance and peaks at **200-400 Mbit/s**.
+That is far below the 864.8 Mbit/s `station dump` rate estimate and below what this hardware should reach (the wired link negotiates 1 Gbps and the
+radio reports HE80 2x2), so there is real room to improve. Two honest caveats: the run's direction, client and tool were not recorded, and there is
+no `iperf3` baseline yet, so the number is an acceptance figure rather than a benchmark `[not verified]`. Improving it -- offloads, flow control and
+the FE/QDMA path -- is deliberately **not** a priority: the board is usable as it is and the work needs a proper `iperf3` setup first. See
+[roadmap.md](roadmap.md) section 7.
+
 ### Two fixes M2 still depends on
 
 * A PCI fixup for the EN7523 root complex: its bogus BAR0 stops
@@ -86,7 +93,13 @@ mt76 patches make the driver own that state instead of leaving it on from driver
 init: the pad-mux init writes "off", `brightness` maps to the pad of the matching
 band, and the radio start/stop path sets and clears it. Semantics on the board:
 radio down -> both LEDs off, radio up and idle -> solid, traffic -> blink.
-Detail: [leds.md](leds.md).
+**All three states were confirmed by eye** by the owner on the flashed image
+(patch 102), so this is `[hardware]` rather than an intention. Detail:
+[leds.md](leds.md).
+
+The **WPS LED stays unresolved and blocked** `[not verified]`: driving all 28
+safe pads (plus pad 16 and pad 28) lights nothing, so no LED node is declared for
+it. Reasoning and what would close it: [leds.md](leds.md) section 11.
 
 ### Network identity
 

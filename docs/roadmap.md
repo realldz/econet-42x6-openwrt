@@ -162,6 +162,12 @@ last unexplained indicator, and the vendor's LED table claims it exists.
 **Acceptance test:** either the LED lights from a device tree node and survives a
 reboot, or the pad is proven unreachable and the item is closed as "no LED".
 
+**Status: blocked, on purpose `[not verified]`.** The 28 safe pads were each driven
+low, plus pad 16 and pad 28, and the button was held for 5 s; nothing lit it. Only
+two ways out remain: identify that pad's other function and re-test with it muxed
+away, or close the item as "no LED". Nothing further is planned. Detail:
+[leds.md](leds.md) section 11.
+
 **Risk: low.** Cosmetic, and the WPS button works regardless.
 
 ## 5. Watchdog and thermal
@@ -206,11 +212,46 @@ with `apk upgrade` documented as forbidden.
 
 **Risk: low**, as long as the rule is followed.
 
+## 7. Throughput: find where the 200-400 Mbit/s goes (low priority)
+
+**Why it matters.** The board works, but it is not fast: acceptance runs peak at
+**200-400 Mbit/s** `[hardware]`, against 1 Gbps negotiated on the wire and a radio
+that reports HE80 2x2. Something in the datapath -- not the link -- is the limit.
+This is explicitly **not** a priority; it is written down so the number stops being
+a mystery.
+
+**Steps**
+
+1. Build a reproducible harness first, because the existing figure does not say how
+   it was obtained `[not verified]`: `iperf3` both directions, wired-to-wired and
+   wired-to-wireless, with the client, version and negotiated link recorded.
+2. Attribute the loss: wired-only against wireless-only separates the Ethernet
+   datapath from the radio, and CPU load during the run says whether the target is
+   CPU-bound or queue-bound.
+3. Then look at the known unknowns from [ethernet.md](ethernet.md) section 7: the
+   unexplained QDMA window overlap, `.ppe_stats_entries = 0` (so PPE statistics
+   cannot help), `eth0` MTU 1504, hardware offload and flow control untested, and a
+   single queue per port.
+4. Only after that, consider offloads or queue changes.
+
+**Acceptance test:** the harness reports a number that is reproducible across
+reboots, the wired number is far above the 200-400 Mbit/s band (no radio in the
+path), and the wireless number is explained rather than guessed.
+
+**Risk: low** (measurement), but a number without a baseline is worse than no
+number -- do not tune anything before the harness exists.
+
 ## Smaller items
 
-Set `IMAGE_SIZE` so an oversized image is rejected at build time rather than
-truncated at flash time, and publish the firmware images plus the Image Builder
-tarball on a tag, with checksums.
+Set `IMAGE_SIZE := 0x2800000` (slot B) in the device profile so an oversized image is
+rejected at build time rather than truncated at flash time `[not verified]` -- the value
+is known, the build that proves the check fires is not done. See
+[sysupgrade.md](sysupgrade.md) section 8.
+
+Publish the firmware images plus the Image Builder tarball on a tag, with checksums --
+and re-check the two per-unit items listed in
+[imagebuilder/README.md](../imagebuilder/README.md) ("Before you publish an image")
+before any image is handed out.
 
 ## Explicitly rejected for now
 

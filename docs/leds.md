@@ -251,13 +251,15 @@ milliseconds: when checking a state, read the mux register (`0x70005054`), not `
 | Radio on, idle | LED solid on | 400/400 samples of pad 15 = `4`, and `delay_on`/`delay_off` empty with `brightness = 255` (the LED core's "never off, keep brightness" branch) |
 | Traffic on a band | that band's LED blinks | pad 14: 201 off / 199 on over 400 samples with a client on 2.4 GHz |
 | Per-band routing | 2.4 GHz -> pad 14, 5 GHz -> pad 15 | isolation test (`MUX1 = 0`, then one class device at a time) |
-| Wi-Fi disabled at boot | LEDs off | **intended by patch 102; eye check outstanding** -- that image's flash was verified at image level only (module on flash changed, no `/etc/config/wireless` in the image, `sysupgrade -T` passes) |
+| Wi-Fi disabled at boot | LEDs off | patch 102 intent, **confirmed by eye** `[hardware]` on the flashed image (`ledfollowradio`, the img22 line): with a radio disabled at boot its LED stays dark, and it follows the radio after it is enabled |
 
-Confirmed **by eye** on the panel: the first pad function code test (code 4, both LEDs lit) and the flashed image carrying patches 100+101, whose
-three states were checked by looking at the board. Confirmed **by instrumented measurement**: all mux register values, the 400-sample duty cycles, the
-band mapping, and the pad map of section 2 (register readback). These LEDs are ordinary mt76 class devices, `mt76-phy0` and `mt76-phy1` under
-`/sys/class/leds`, with `max_brightness = 255` (unlike `gpio-leds`, whose maximum is 1), and the triggers `[phy0tpt]`/`[phy1tpt]` are registered by
-mt76 itself, so no device-tree LED node is needed.
+Confirmed **by eye** on the panel `[hardware]`: the first pad function code test (code 4, both LEDs lit), the flashed image carrying patches 100+101
+(three states checked by looking at the board), and the flashed image carrying patch 102 -- the owner checked the whole table above on the board,
+2026-10-08: radio down -> both dark, radio up and idle -> solid, traffic -> blink. Before that check, patch 102 had only been verified at image
+level (module on flash changed, no `/etc/config/wireless` in the image, `sysupgrade -T` passes). Confirmed **by instrumented measurement**: all mux
+register values, the 400-sample duty cycles, the band mapping, and the pad map of section 2 (register readback). These LEDs are ordinary mt76 class
+devices, `mt76-phy0` and `mt76-phy1` under `/sys/class/leds`, with `max_brightness = 255` (unlike `gpio-leds`, whose maximum is 1), and the triggers
+`[phy0tpt]`/`[phy1tpt]` are registered by mt76 itself, so no device-tree LED node is needed.
 
 ## 9. Design decision: fix the driver, not userspace
 
@@ -284,15 +286,25 @@ Read this before touching any GPIO on this board.
 On kernel 6.18, **never write the LED `trigger` sysfs attribute**: a parallel port project on the same kernel hit a NULL dereference inside
 `led_trigger_set()` when writing it, and although that was not reproduced here the rule stands -- read `trigger`, write `brightness`. Related: a sysfs
 `brightness` write goes through the LED core's sysfs path, which drops the LED's trigger on a `0` write (`led_trigger_remove()`), whereas a driver
-calling `led_set_brightness()` does not. (Kernel behaviour, not re-measured here; what *was* measured is that the throughput trigger has already
-stopped its software-blink timer when there is no traffic, so a brightness write does stick while the link is idle.)
+calling `led_set_brightness()` does not. `[not verified]` -- the trigger-detach path is kernel behaviour read from the sources, not re-measured on
+this board; what *was* measured here is that the throughput trigger has already stopped its software-blink timer when there is no traffic, so a
+brightness write does stick while the link is idle.
 
 ## 11. Open items
 
-- **WPS LED: unresolved.** All 28 safe pads were driven low one at a time, plus pad 16 and pad 28, and the WPS button was held for 5 s; no pad lights
-  that LED. Either it is not wired to the SoC or it is not populated on this variant. Marked blocked; no LED node is declared for it.
-- The mux patch covers chip id `0x7906` only; `case 0x7916` keeps function code `3` because no MT7986 board was available to test it, and
-  `mt7915_led_mux_set()` carries a prototype in two files (`init.c`, `main.c`) that would be cleaner in `mt7915.h`.
-- The two keys are polled even though the pinctrl node can raise interrupts (GIC SPI 26); an interrupt-driven `gpio-keys` binding is possible but
-  untried, and the LED behaviour of the current images (with patch 102) still needs the eye check: radio off -> off, radio on and idle -> solid, traffic
-  -> blink.
+Nothing here blocks using the board; every entry says what would close it.
+
+- **WPS LED: unresolved, deliberately left blocked.** All 28 safe pads were driven low one at a time, plus pad 16 and pad 28, and the WPS button was
+  held for 5 s; no pad lights that LED. Either it is not wired to the SoC or it is not populated on this variant. No LED node is declared for it, and
+  no further pad sweeping is planned -- closure needs either the pad's second function muxed away (the pad is not yet identified) or an explicit
+  decision to close it as "no LED". `[not verified]`
+- **`case 0x7916` (MT7986) is untested** `[not verified]`: the mux patch covers chip id `0x7906` only, and `0x7916` keeps function code `3` because no
+  MT7986 board was available. Also cosmetic: `mt7915_led_mux_set()` carries a prototype in two files (`init.c`, `main.c`) that would be cleaner in
+  `mt7915.h`.
+- **The `wifi reload` race was not re-measured after patch 102** `[not verified]`: on the patch-101 image, 2.4 GHz sometimes failed to come back on
+  after a `wifi reload`. The owner has not seen the LEDs misbehave on the patch-102 image, but no scripted reload loop was run to prove it is gone.
+- **Buttons are polled, not interrupt-driven** `[not verified]`: `gpio-keys-polled` is used because only GPIO 0..15 can raise an interrupt. The
+  pinctrl node can raise GIC SPI 26, so an interrupt-driven `gpio-keys` binding is possible -- it has not been tried, and the claim that this would
+  work is read from the device tree, not measured.
+- **Closed since the previous revision:** the eye check of the patch-102 image (section 8) -- done on the board by the owner, and the LED semantics
+  table is now `[hardware]` throughout.

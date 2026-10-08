@@ -252,6 +252,7 @@ For this board's layout a sysupgrade image must satisfy:
 | squashfs superblock | `hsqs` at **`0x3A0000`** (3,801,088), never beyond it | `0x3A0000` is the size of the derived `kernel` partition (mtd4); the rootfs begins where it ends |
 | image size | 9,437,473 bytes (`0x900001`) for the current package set | kernel + squashfs + trailer; another package set changes it, the offset above does not |
 | FIT `load` / `entry` | `0x80208000` | anything else deadloops in `head.S` with a silent UART -- check with [`tools/verify_build.py`](../tools/verify_build.py) |
+| whole-image size | must stay under slot B, `0x2800000` (41,943,040 bytes) | **nothing enforces this at build time yet**: the device definition sets no `IMAGE_SIZE`, so an oversized image is truncated at flash time rather than refused at build time. Current images are 9,437,473 bytes, well inside; adding `IMAGE_SIZE := 0x2800000` to the device profile in `openwrt/patches/0002-*.patch` is the fix, and it needs one build to confirm before it can be trusted `[not verified]` |
 
 `0x3A0000` comes from `mtdsplit_fit`: it takes the FIT's `totalsize` and rounds it **up to the
 erase-block size** (128 KiB, `0x20000`) to get the `kernel` partition, and the `rootfs` partition is
