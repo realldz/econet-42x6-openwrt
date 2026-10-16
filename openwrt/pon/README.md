@@ -25,10 +25,19 @@ pre-O5 (downstream unresolved) -- see [docs/pon-port.md](../../docs/pon-port.md)
 | Ethernet/PCS port (`airoha_eth` hooks, NPU shim, PCS API, `airoha_wed.h` forward decl.) | `.../patches-6.18/940-01`..`940-06` + `overlay/drivers/net/ethernet/airoha/airoha_wed.h` (via `apply-pon.sh`) | OpenWrt + `scripts/apply-overlay.sh` |
 | EN7523 bring-up guards (SCU clock-domain reset, undecoded-register guards, stop-before-PLOAM, disable-path breadcrumbs, LOS-from-ready) | `patches-6.18/950-01`..`950-08` | `--with-pon` (needs the community sources) |
 | pinctrl + reset-pulse prerequisites | `.../patches-6.18/202-29`, `202-30` | OpenWrt, during the build |
-| Symbol selection + kmod packages | `buildroot-patches/0007-target-airoha-enable-xpon.patch` | `scripts/apply-overlay.sh --with-pon` |
+| Symbol selection + kmod packages | `buildroot-patches/0007-target-airoha-enable-xpon.patch` (and `0006` for the optical frontend) | `scripts/apply-overlay.sh --with-pon` |
 | Board device tree (GDM2, `xpon`, `xpon_phy`, `pon_pcs`, `scu_reg`, `bob` + `gpon_serial` cell) | `../overlay/target/linux/airoha/dts/en7523-vgp42x6v1{,-pon}.dtsi` | `scripts/apply-overlay.sh` |
-| Kernel `.config` symbols (5× `=m`) | `scripts/packages.append` is packages; kernel symbols come from `0007` | `scripts/build-firmware.sh` |
+| Kernel `.config` symbols (6× `=m`, written by `0006` and `0007`) | `buildroot-patches/` | nothing sets them without `--with-pon`; `scripts/build-firmware.sh` refuses a build that asks for them without it |
 | OMCI userspace (`omci-agent`, `luci-app-omci`, canonical UAPI) | `../omci/` | `../omci/apply-omci.sh` (called by `scripts/apply-overlay.sh`) |
+
+`0006` and `0007` are **buildroot** patches -- they write the six symbols into
+`target/linux/airoha/en7523/config-6.18` and declare the kmod packages -- so they are
+not part of the kernel patch series and they used not to be here: they were steps 6
+and 7 of the *default* series, which meant an M2 build asked the kernel for `net/xpon/`
+and `drivers/net/optical/` and died 18 seconds into `target/linux/compile`, after 44
+minutes of toolchain work. An M2 image is defined by having no optical and no xPON
+code at all, so they now live in `buildroot-patches/` and `--with-pon` is what applies
+them. See [docs/ci.md](../../docs/ci.md), trap 10.
 
 `apply-pon.sh` today stages exactly one file -- the `airoha_wed.h` stub that
 cannot live in `patches-6.18` (it is a *new* file, and the route-A baseline

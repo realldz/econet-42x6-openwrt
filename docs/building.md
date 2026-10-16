@@ -92,13 +92,19 @@ This does four things:
 3. optionally copies `openwrt/dbg/` with `--with-mt76-debug` -- one diagnostic
    mt76 patch that prints ring base addresses and must never ship;
 4. with `--with-pon`, adds the nine xPON patches from `openwrt/pon/patches-6.18/`
-   to the kernel series. Those patch `net/xpon/**`, `airoha_xpon.[ch]`,
-   `phy-airoha-xpon.c` and `airoha_gpon_omci.c`, which come from the community
-   `airoha_en7523_all` branch and are **not** in this repository, so the flag is only
-   useful in a tree that has them; without them the kernel stage stops at the first
-   of the nine (`can't find file to patch`). The default series is
-   `930-55`..`930-59` and `940-01`..`940-06`, which touch upstream files only, and
-   that is what a release image is built from.
+   to the kernel series **and** applies `openwrt/pon/buildroot-patches/0006` and
+   `0007`. Those patch `net/xpon/**`, `airoha_xpon.[ch]`, `phy-airoha-xpon.c` and
+   `airoha_gpon_omci.c`, which come from the community `airoha_en7523_all` branch
+   and are **not** in this repository, so the flag is only useful in a tree that has
+   them; without them the kernel stage stops at the first of the nine
+   (`can't find file to patch`). 0006 and 0007 are what switch the kernel symbols on
+   and declare the kmod packages, and they are the reason the default series sets no
+   `CONFIG_XPON`, `CONFIG_XPON_OMCI`, `CONFIG_XPON_OAM`, `CONFIG_PHY_AIROHA_XPON`,
+   `CONFIG_AIROHA_XPON_V1` or `CONFIG_OPTICAL_FRONTEND` at all: an M2 image carries
+   no optical and no xPON code, and `build-firmware.sh` refuses to start if any of
+   those six symbols is set without the flag. The default series is
+   `940-01`..`940-06` plus `930-55`..`930-59` minus nothing, which touch upstream
+   files only, and that is what a release image is built from.
 
 It refuses to run if the tree is not at the pinned revision, and each patch is
 checked with `--reverse --check` before it is applied, so a run that failed halfway
@@ -252,7 +258,7 @@ Useful flags:
 | `--debug-kmods` | install `kmod-pciedbg` and `kmod-ringwatch` into the image |
 | `--no-packages` | seed no package list at all into `.config` |
 | `--no-feeds` | do not run `./scripts/feeds update -a` / `install -a` first |
-| `--with-pon` | also add the nine xPON patches from `openwrt/pon/patches-6.18/`, which need the community xPON sources as well (not in this repository) |
+| `--with-pon` | also add the nine xPON patches from `openwrt/pon/patches-6.18/` and `0006`/`0007` from `openwrt/pon/buildroot-patches/`, all of which need the community xPON sources as well (not in this repository); without it no `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol is set at all |
 | `--mt76-debug` | also apply the diagnostic mt76 ring patch (never ship it) |
 | `--imagebuilder` | also produce the Image Builder tarball |
 | `--no-apply` | skip step 2, if the overlay is already in the tree |

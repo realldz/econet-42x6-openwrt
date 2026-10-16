@@ -49,9 +49,9 @@ hand every image it produces an initramfs-embedded kernel.
 | `tools/check_patches.py` | A hunk header that disagrees with its body. `git apply` reads exactly as many body lines as the header promised and exits 0 for the remainder, so an under-counting header drops the tail of a hunk silently: that is how `CONFIG_I2C_MT7621=y` once went missing from an image while every check stayed green. |
 | `tools/check_patches_apply.py` | The series not applying to a clean tree at the pinned revision -- well-formed and applicable are different properties. It fetches every file the series touches from `raw.githubusercontent.com` at `OPENWRT_COMMIT`, applies the patches in the order `apply-overlay.sh` uses, and stops at the first refusal. About ten seconds, against hours for a build. If the network is unavailable it prints `SKIPPED` and exits 0: that is not a patch problem, but it is never silent. |
 | `tools/test_check_patches_apply.sh` | The gate above failing to fail. It plants a patch whose context does not exist and one shaped like the patch that broke this pipeline, and asserts both are refused by name. |
-| `tools/test_publish_packages.sh` | The package publisher's failure paths and both source layouts. 34 checks, no OpenWrt tree. |
-| `tools/test_build_firmware.sh` | `set_cfg`/`set_cfg_off`, the option parser, including `-jN`, and the failure report itself. |
-| `kernel-patches.yml` | The kernel patch series not applying. This is the one gate that needs an OpenWrt tree and the one no check in this repository can replace: the series is applied *inside* the kernel build, against kernel sources, so `check_patches_apply.py` is blind to it by construction -- which is how nine patches that modified files the repository does not carry reached a release build. The job clones the tree, applies the overlay, and runs `BUILD_TARGET=target/linux/prepare`, which reaches the patches in about twenty seconds instead of forty minutes. It does not compile the kernel, so it cannot catch a compile error. |
+| `tools/test_publish_packages.sh` | The package publisher's failure paths and both source layouts. 42 checks, no OpenWrt tree. It covers the case a real tree found and no fixture had: one kernel published under several version strings (`6.18.54`, `6.18.54.7.2`, `6.18.54.2026.09.01~be5ce791`), which an earlier publisher refused as "more than one kernel". |
+| `tools/test_build_firmware.sh` | `set_cfg`/`set_cfg_off`, the option parser, including `-jN`, the failure report itself, and `check_target_kernel_config`. |
+| `kernel-patches.yml` | The kernel patch series not applying, and a target kernel config that asks for modules this repository does not carry. This is the one gate that needs an OpenWrt tree and the one no check in this repository can replace: the series is applied *inside* the kernel build, against kernel sources, so `check_patches_apply.py` is blind to it by construction -- which is how nine patches that modified files the repository does not carry reached a release build. The job clones the tree, applies the overlay, and runs `BUILD_TARGET=target/linux/prepare`, which reaches the patches in about twenty seconds instead of forty minutes. Since the M2 fix it also runs the config check above, which is what would have caught the six xPON/optical symbols that made an M2 build ask for `net/xpon/`: 59 seconds on run 38931301958, against 44 minutes and an 18-second failure with no log. It does not compile the kernel, so it cannot catch a compile error. |
 | `tools/verify_build.py` | Run after the build: the FIT load and entry addresses must match where the kernel is linked, and the image must carry no debug breadcrumbs. |
 | `tools/verify_image.py` | Run after the build on the persistent image: a squashfs superblock must exist and start inside the kernel partition. This is the gate that keeps an unsplittable image out of a release. |
 
@@ -165,6 +165,35 @@ catches it locally:
    `openwrt/patches/`, which is applied to upstream files, and not the kernel
    series. Those nine patches now live in `openwrt/pon/patches-6.18/` and need
    `--with-pon`.
+
+10. An M2 build asked the kernel to build the xPON and optical modules. The package
+    list was right -- `packages-m2.append` seeds fifteen packages and no `kmod-xpon`
+    -- and the *kernel* config was not: `0006` and `0007` were steps 6 and 7 of the
+    default series, and they write six symbols into
+    `target/linux/airoha/en7523/config-6.18`:
+
+    ```
+    CONFIG_XPON=m
+    CONFIG_XPON_OMCI=m
+    CONFIG_XPON_OAM=m
+    CONFIG_PHY_AIROHA_XPON=m
+    CONFIG_AIROHA_XPON_V1=m
+    CONFIG_OPTICAL_FRONTEND=m
+    ```
+
+    so every build, M2 included, needed `net/xpon/` and `drivers/net/optical/`,
+    which only exist in the community branch. `make target/linux/compile` died on
+    run 38635021287 after **18 seconds** -- 21:30:50.71 to 21:31:08.74, following 44
+    minutes of toolchain work -- and the runner's log held no reason at all: 18
+    seconds is too short to compile anything, which is what points at the kernel's
+    own configure step. Both patches are buildroot patches (they edit `config-6.18`
+    and declare the kmod packages) and now live in
+    `openwrt/pon/buildroot-patches/`, applied only with `--with-pon`.
+    `build-firmware.sh` refuses to start when a build without `--with-pon` asks for
+    any of those six symbols, naming them, so the failure costs seconds instead of
+    three quarters of an hour. The lesson is the same shape as 9: "no PON in this
+    image" is a claim about the *kernel config*, and a correct package list does not
+    make it true.
 
 ## When a build fails
 
