@@ -252,8 +252,8 @@ Useful flags:
 |---|---|
 | `--initramfs` | also emit `*-initramfs-kernel.bin` (the RAM-boot image); this is the default |
 | `--no-initramfs` | skip it -- use this when you only want the persistent image, see the warning below |
-| `--variant m2` | seed `scripts/packages-m2.append`: Ethernet, Wi-Fi, LuCI and apk, with no optical/xPON/OMCI. This is the shape of a release image. |
-| `--variant full` | seed `scripts/packages.append`: the same plus the optical frontend and the xPON/OMCI stack, which need the per-unit BOB blob. This is the default. |
+| `--variant m2` | seed `scripts/packages-m2.append`: Ethernet, Wi-Fi, LuCI and apk, with no optical/xPON/OMCI -- and, since 0006/0007 left the default series, no `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol either, so the kernel is not asked for sources that are not here. This is the shape of a release image. |
+| `--variant full` | seed `scripts/packages.append`: the same plus the optical frontend and the xPON/OMCI stack, which need the per-unit BOB blob -- and, because those kmod packages are declared by `0006`/`0007`, `--with-pon` as well; without it the seed dies at the post-defconfig gate. This is the default. |
 | `--packages FILE` | seed `FILE` instead of either list |
 | `--debug-kmods` | install `kmod-pciedbg` and `kmod-ringwatch` into the image |
 | `--no-packages` | seed no package list at all into `.config` |
