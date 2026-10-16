@@ -123,6 +123,25 @@ gh workflow run release.yml --ref main `
 A tag push (`git push origin v0.1.0-m2`) runs the same thing with the defaults, so
 the tag and the release always agree.
 
+Then check what the run actually published, rather than that it went green:
+
+```sh
+python3 tools/verify_publish.py v0.1.0-m2
+```
+
+It reads the release and its assets, the `gh-pages` branch and the live Pages URLs a
+board would fetch, and exits non-zero on any missing piece. On `v0.1.0-m2` (run
+`38939207748`) that is 19 checks: the four release assets, the sysupgrade image at
+9,437,480 B, the Image Builder at 47,340,172 B, `releases.json` listing the tag,
+`install.md` naming the kmod directory, and 46 `kmod-*.apk` beside
+`kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk` on the branch.
+
+The last of those is the check that matters and the one that is easy to get wrong:
+an apk index on main is the binary ADB format (it begins `ADBd`), not text with
+`P: name` lines. The first version of this tool parsed it as text and reported zero
+kernel modules for a repository holding 46 of them, so the count now comes from the
+branch listing and from `metadata.json`.
+
 ## What has gone wrong here
 
 Each of these cost a run before it was fixed, and each has a check above that now

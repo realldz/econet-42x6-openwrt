@@ -18,6 +18,44 @@ milestone is only "done" when its stated acceptance test passes.
 | **M3** | Optical | `en7571` probes, hwmon exposes bias/temperature, `tx_enabled=1` | **done** `[hardware]`: `en7571` probes on `i2c0` at `0x70`, DDMI temperature/voltage read and match stock, BOB loads (see [pon-port.md](pon-port.md) section 14) |
 | **M4** | GPON O5 + OMCI | `GPON netdev link ready: O5=1 OMCI=1`, OLT accepts the ONU, OMCI MIB replies | **in progress** `[hardware]`: route-A stack builds clean (7 modules, autoloaded, self-loading), xPON probes on the board, OMCI userspace answers (`compatible: true`); GPON reaches O1->O2 with fibre but downstream never resolves -- MAC IRQs quiet, OMCI counters zero ([pon-port.md](pon-port.md) sections 15-21) |
 
+## Published images and the package repository
+
+The first end-to-end CI release, measured on what it published rather than on what
+it was supposed to publish:
+
+| | |
+|---|---|
+| release | [`v0.1.0-m2`](https://github.com/realldz/econet-42x6-openwrt/releases/tag/v0.1.0-m2), built by [run 38939207748](https://github.com/realldz/econet-42x6-openwrt/actions/runs/38939207748) in 1h07m45s |
+| variant | `m2` -- 4x GbE, Wi-Fi 6 (MT7916), LuCI over HTTPS, apk. No optical frontend, no xPON/OMCI |
+| sysupgrade | `openwrt-airoha-en7523-econet_vgp-42x6v1-squashfs-sysupgrade.bin`, 9,437,480 B |
+| initramfs | `openwrt-airoha-en7523-econet_vgp-42x6v1-initramfs-kernel.bin` |
+| Image Builder | `openwrt-imagebuilder-airoha-en7523.Linux-x86_64.tar.zst`, 47,340,172 B |
+| kmod repository | `https://realldz.github.io/econet-42x6-openwrt/v0.1.0-m2/kmods/6.18.54` -- 59 files, **46 kernel modules**, `kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk` among them |
+
+Three kernel version strings appear in that one repository, and that is normal:
+`kmod-pppoe-6.18.54-r1.apk`, `kmod-mac80211-6.18.54.7.2-r4.apk` (the mac80211/cfg80211
+backports) and `kmod-mt7915e-6.18.54.2026.09.01~be5ce791-r1.apk` (mt76). apk keeps them
+apart with `depends: kernel (=<version>)`, not with the file name, so the directory is
+the right one for the image as long as the URL carries its tag.
+
+It carries no `kmod-xpon`, no `kmod-xpon-omci` and no `kmod-optical-frontend`: the M2
+variant defines itself by not having the optical or xPON code, and the patches that
+would declare those modules (and would ask the kernel for `net/xpon/`) are behind
+`--with-pon`. Installing from it, on the board:
+
+```sh
+echo 'https://realldz.github.io/econet-42x6-openwrt/v0.1.0-m2/kmods/6.18.54' \
+  > /etc/apk/repositories.d/42x6-kmods.list
+apk update --allow-untrusted
+apk add --allow-untrusted <package>
+```
+
+`[not verified]` on hardware: nothing in this table has been flashed or installed
+from on a board yet. The images are the same shape as the ones that boot (M1/M2 above),
+and the repository is keyed to the kernel those images run, but the `apk add` itself
+has not been run on the board, and neither has the negative case (a module built for
+another kernel tag must fail with `Invalid module format`).
+
 ## M1 -- done `[hardware]`
 
 Verified from a clean boot, with no manual register writes:
