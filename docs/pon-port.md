@@ -618,7 +618,8 @@ build and the probe; `[not verified]` for anything past that.
 The earlier plan (a hand-applied shim header plus six hook patches) is
 retired. Instead the xPON stack is ported the way OpenWrt expects: a patch
 series under `openwrt/overlay/target/linux/airoha/patches-6.18/` that the
-build applies by itself, plus symbol selection in `openwrt/patches/0007-*`.
+build applies by itself, plus symbol selection in `openwrt/pon/buildroot-patches/0007-*`,
+which `--with-pon` applies.
 
 `930-60` and `950-01`..`950-08` are **not** part of that default series: they
 modify `net/xpon/**`, `airoha_xpon.[ch]`, `phy-airoha-xpon.c` and
@@ -645,7 +646,8 @@ it) staged by `openwrt/pon/apply-pon.sh` into `target/linux/airoha/files/`.
 `CONFIG_NET_AIROHA_SOC_WED` stays off, so every WED call compiles to a no-op
 and no `mtk_wed` driver is pulled in.
 
-`openwrt/patches/0007-target-airoha-enable-xpon.patch` selects the symbols
+`openwrt/pon/buildroot-patches/0007-target-airoha-enable-xpon.patch`, which `--with-pon`
+applies, selects the symbols
 (`CONFIG_XPON`/`XPON_OMCI`/`XPON_OAM`/`PHY_AIROHA_XPON`/`AIROHA_XPON_V1` as
 modules, `CONFIG_PCS_AIROHA_EN7523` built-in) and declares five kmod packages
 so the modules land in the rootfs with autoload entries.

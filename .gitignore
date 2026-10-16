@@ -24,6 +24,12 @@ tmp/
 __pycache__/
 *.pyc
 
+# OpenWrt build trees.  The workflows clone OpenWrt into these paths, inside the
+# checkout (upload-artifact refuses a path with '..' in it, and cloning into the
+# repository's own openwrt/ directory would collide with the overlay).
+owrt-build/
+owrt-kernel-check/
+
 # Editors and OS cruft
 .vscode/
 .idea/

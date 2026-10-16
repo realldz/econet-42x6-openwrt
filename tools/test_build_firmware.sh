@@ -22,10 +22,10 @@ trap 'rm -rf "$WORK"' EXIT
 
 # The helpers are pulled out of the script rather than copied, so this cannot
 # drift into testing a stale duplicate of them.
-sed -n '/^set_cfg() {/,/^}/p;/^set_cfg_off() {/,/^}/p;/^report_build_failure() {/,/^}/p' \
+sed -n '/^set_cfg() {/,/^}/p;/^set_cfg_off() {/,/^}/p;/^report_build_failure() {/,/^}/p;/^check_target_kernel_config() {/,/^}/p' \
 	scripts/build-firmware.sh > "$WORK/helpers.sh"
 if [ ! -s "$WORK/helpers.sh" ]; then
-	echo "!! could not extract set_cfg/set_cfg_off/report_build_failure from scripts/build-firmware.sh"
+	echo "!! could not extract set_cfg/set_cfg_off/report_build_failure/check_target_kernel_config from scripts/build-firmware.sh"
 	exit 1
 fi
 # shellcheck disable=SC1090,SC1091
@@ -179,6 +179,47 @@ case "$out" in
 		echo "  ok   an unmatched logs/ directory says so" ;;
 	*)	echo "  FAIL an empty logs/ directory was reported as having content: $out"; fails=$((fails + 1)) ;;
 esac
+
+echo "== the target kernel config, when it asks for modules this repo does not carry"
+# Run 38635021287 died eighteen seconds into `target/linux/compile` because
+# config-6.18 asked for net/xpon/ and drivers/net/optical/, which only exist in the
+# community branch.  The check has to fire on exactly those symbols, pass for a
+# clean config, and stay quiet under --with-pon, where the sources are expected.
+KCFG="$WORK/config-6.18"
+printf 'CONFIG_XPON=m\nCONFIG_KERNEL_DEVTMPFS=y\n' > "$KCFG"
+out=$(check_target_kernel_config "$KCFG" 0 2>&1); rc=$?
+case "$out" in
+	*"modules that are not in this repository"*)
+		echo "  ok   a config that asks for xPON is refused" ;;
+	*)	echo "  FAIL an xPON symbol in the kernel config was accepted: $out"; fails=$((fails + 1)) ;;
+esac
+[ "$rc" -ne 0 ] && echo "  ok   and it reports failure" || { echo "  FAIL it did not fail"; fails=$((fails + 1)); }
+case "$out" in
+	*"CONFIG_XPON=m"*)
+		echo "  ok   the symbol is named" ;;
+	*)	echo "  FAIL the offending symbol is not named"; fails=$((fails + 1)) ;;
+esac
+case "$out" in
+	*"buildroot-patches/0006 and 0007"*)
+		echo "  ok   and it says where those symbols belong" ;;
+	*)	echo "  FAIL it does not say where to get them"; fails=$((fails + 1)) ;;
+esac
+
+# The same config with --with-pon: the sources are expected to be there, so this
+# must pass -- otherwise the flag that exists for that case could not be used.
+out=$(check_target_kernel_config "$KCFG" 1 2>&1) \
+	&& echo "  ok   --with-pon accepts the same config" \
+	|| { echo "  FAIL --with-pon was rejected: $out"; fails=$((fails + 1)); }
+
+# A clean config, and a tree with no config file yet (which is the state before
+# 0003 creates it).
+printf 'CONFIG_KERNEL_DEVTMPFS=y\n' > "$KCFG"
+check_target_kernel_config "$KCFG" 0 \
+	&& echo "  ok   a clean kernel config is accepted" \
+	|| { echo "  FAIL a clean kernel config was refused"; fails=$((fails + 1)); }
+check_target_kernel_config "$WORK/no-such-config" 0 \
+	&& echo "  ok   a missing config file is not an error" \
+	|| { echo "  FAIL a missing config file was refused"; fails=$((fails + 1)); }
 
 echo
 if [ "$fails" -ne 0 ]; then

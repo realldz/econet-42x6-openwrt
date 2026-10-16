@@ -6,7 +6,7 @@
 #
 # Route A: most of the xPON material is a kernel patch series
 # (openwrt/overlay/target/linux/airoha/patches-6.18/ 930-55..59, 940-01..06,
-# enabled by openwrt/patches/0007-*), which OpenWrt applies by itself during the
+# enabled by openwrt/pon/buildroot-patches/0007-*, which --with-pon applies).
 # build.  This script stages the files that cannot live in patches-6.18:
 #
 #   openwrt/pon/overlay/drivers/net/ethernet/airoha/airoha_wed.h
@@ -41,7 +41,7 @@ cat <<EOF
 ==> Route-A kernel patches apply by themselves.
     The 930-55..59 / 940-01..06 series already lives in
     target/linux/airoha/patches-6.18/ (copied by scripts/apply-overlay.sh),
-    and openwrt/patches/0007-* selects the symbols and declares the kmod
+    and openwrt/pon/buildroot-patches/0007-* selects the symbols and declares the kmod
     packages.  No manual hook patching is needed.
 
     The xPON-only patches -- 930-60 and 950-01..08, which modify net/xpon/**

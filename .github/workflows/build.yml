@@ -122,8 +122,15 @@ jobs:
     # made GitHub reject the whole file -- the push produced no jobs at all, just
     # "This run likely failed because of a workflow file issue".  tools/
     # check_workflows.py now knows this table and refuses the file locally.
+    # Inside the workspace, but not the repository's own openwrt/ directory, which
+    # scripts/apply-overlay.sh copies into and this clone would collide with.  It is
+    # gitignored.  The tree used to sit beside the workspace
+    # (`${{ github.workspace }}/../owrt-build`), and upload-artifact refuses to read
+    # such a path -- "Invalid pattern ... Relative pathing '.' and '..' is not
+    # allowed" -- so the step whose whole purpose is to publish the build logs failed
+    # instead, on the one run whose logs mattered.
     env:
-      OWRT_DIR: ${{ github.workspace }}/../owrt-build
+      OWRT_DIR: ${{ github.workspace }}/owrt-build
 
     steps:
       - uses: actions/checkout@v4

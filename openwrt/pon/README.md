@@ -10,7 +10,7 @@ shortcut: it targets kernel 4.4.115, so its ABI does not match 6.18.
 normal kernel patch series that OpenWrt applies by itself during the build
 (`930-55`..`930-60` hook the new subsystems in, `940-01`..`940-06` port the
 Ethernet/PCS glue, `950-xx` carry the EN7523 bring-up fixes), selected by
-`openwrt/patches/0007-*` and described by the board device tree
+`openwrt/pon/buildroot-patches/0007-*`, applied only with `--with-pon`, and described by the board device tree
 (`en7523-vgp42x6v1.dts` + `en7523-vgp42x6v1-pon.dtsi`). There is no separate
 clone to fetch and no hand-applied hook step anymore. What still does not
 work is the link itself: the driver probes on hardware but GPON stays
@@ -25,7 +25,7 @@ pre-O5 (downstream unresolved) -- see [docs/pon-port.md](../../docs/pon-port.md)
 | Ethernet/PCS port (`airoha_eth` hooks, NPU shim, PCS API, `airoha_wed.h` forward decl.) | `.../patches-6.18/940-01`..`940-06` + `overlay/drivers/net/ethernet/airoha/airoha_wed.h` (via `apply-pon.sh`) | OpenWrt + `scripts/apply-overlay.sh` |
 | EN7523 bring-up guards (SCU clock-domain reset, undecoded-register guards, stop-before-PLOAM, disable-path breadcrumbs, LOS-from-ready) | `patches-6.18/950-01`..`950-08` | `--with-pon` (needs the community sources) |
 | pinctrl + reset-pulse prerequisites | `.../patches-6.18/202-29`, `202-30` | OpenWrt, during the build |
-| Symbol selection + kmod packages | `../patches/0007-target-airoha-enable-xpon.patch` | `scripts/apply-overlay.sh` |
+| Symbol selection + kmod packages | `buildroot-patches/0007-target-airoha-enable-xpon.patch` | `scripts/apply-overlay.sh --with-pon` |
 | Board device tree (GDM2, `xpon`, `xpon_phy`, `pon_pcs`, `scu_reg`, `bob` + `gpon_serial` cell) | `../overlay/target/linux/airoha/dts/en7523-vgp42x6v1{,-pon}.dtsi` | `scripts/apply-overlay.sh` |
 | Kernel `.config` symbols (5× `=m`) | `scripts/packages.append` is packages; kernel symbols come from `0007` | `scripts/build-firmware.sh` |
 | OMCI userspace (`omci-agent`, `luci-app-omci`, canonical UAPI) | `../omci/` | `../omci/apply-omci.sh` (called by `scripts/apply-overlay.sh`) |

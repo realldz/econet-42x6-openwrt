@@ -1,7 +1,7 @@
 # OMCI userspace: `omci-agent` + `luci-app-omci`
 
 Control plane for the in-kernel OMCI stack (`net/xpon/omci/`, enabled by
-`openwrt/patches/0007-*`). Two packages, applied to the tree by
+`openwrt/pon/buildroot-patches/0007-*`, applied only with `--with-pon`). Two packages, applied to the tree by
 [`apply-omci.sh`](apply-omci.sh) -- `scripts/apply-overlay.sh` calls it, so a
 normal build already includes this. The script also synchronises the UAPI
 header; read [the v13 vs v14 story](#uapi-must-match-the-kernel-v13-vs-v14)

@@ -26,9 +26,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      # Outside the checkout: this repository has an openwrt/ directory, and a clone
-      # into it fails on the second run of a job that shares the workspace.
-      OWRT_DIR: ${{ github.workspace }}/../owrt-kernel-check
+      # Inside the checkout but not in its openwrt/ directory, which is where this
+      # repository keeps the overlay: a clone into that path would collide with it.
+      # Beside the workspace does not work either, because upload-artifact refuses
+      # any path containing '..' -- see the note in build.yml.
+      OWRT_DIR: ${{ github.workspace }}/owrt-kernel-check
     steps:
       - uses: actions/checkout@v4
 

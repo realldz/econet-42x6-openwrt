@@ -231,6 +231,41 @@ if [ "$WITH_PON" = "1" ]; then
     docs/pon-port.md.
 EOF
 	fi
+
+	# 0006 and 0007 used to be steps 6 and 7 of the default series, and that made
+	# every build -- including the M2 one that is supposed to have no optical or xPON
+	# code at all -- put CONFIG_XPON=m, CONFIG_XPON_OMCI=m, CONFIG_XPON_OAM=m,
+	# CONFIG_PHY_AIROHA_XPON=m, CONFIG_AIROHA_XPON_V1=m and CONFIG_OPTICAL_FRONTEND=m
+	# into the target kernel config.  The kernel then tried to build net/xpon/ and
+	# drivers/net/optical/, which only exist in the community branch, and the kernel
+	# stage died 18 seconds into `make target/linux/compile` -- measured on run
+	# 38635021287, with the reason in no log at all.  They are buildroot patches (they
+	# touch config-6.18 and declare the kmod packages), so they are applied here
+	# rather than by the kernel patch series.
+	echo
+	echo "==> optical frontend + xPON package definitions (--with-pon)"
+	PON_BR="$REPO/openwrt/pon/buildroot-patches"
+	for p in "$PON_BR"/*.patch; do
+		[ -e "$p" ] || continue
+		name=$(basename "$p")
+		if git -C "$OWRT" apply --check "$p" 2>/dev/null; then
+			git -C "$OWRT" apply "$p"
+			echo "    applied       $name"
+		elif git -C "$OWRT" apply --reverse --check "$p" 2>/dev/null; then
+			echo "    already there $name"
+		else
+			echo "!! cannot apply $name" >&2
+			echo "   The default series changed: regenerate it against this tree." >&2
+			exit 1
+		fi
+	done
+	cat <<'EOF'
+    These declare kmod-optical-frontend, kmod-xpon, kmod-xpon-omci, kmod-xpon-oam,
+    kmod-phy-airoha-xpon and kmod-airoha-xpon, and switch their kernel symbols on.
+    Without --with-pon they are not applied, so the M2 image carries no optical and
+    no xPON code -- which is what it is for: the optical frontend needs the per-unit
+    BOB laser calibration blob that is not published with the images.
+EOF
 fi
 echo
 echo "==> OMCI userspace (omci-agent + luci-app-omci, UAPI sync)"

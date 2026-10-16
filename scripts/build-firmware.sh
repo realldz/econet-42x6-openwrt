@@ -207,18 +207,26 @@ report_build_failure() { # report_build_failure <captured-make-output> <owrt-tre
 	echo "!! the build failed: the directory that failed is '${failed:-unknown}'"
 	if [ ! -d "$owrt/logs" ]; then
 		echo "    (there is no $owrt/logs directory to read)"
-		return 0
+	else
+		found=0
+		while IFS= read -r f; do
+			found=1
+			echo
+			echo "--- $f (last 80 lines)"
+			tail -n 80 "$f"
+		done < <(find "$owrt/logs" -type f -name '*.txt' \
+			\( -path "*${failed:-/no-such-directory}*" -o -mmin -20 \) \
+			2>/dev/null | head -20)
+		[ "$found" -eq 1 ] || echo "    (nothing in $owrt/logs matched)"
 	fi
-	found=0
-	while IFS= read -r f; do
-		found=1
-		echo
-		echo "--- $f (last 80 lines)"
-		tail -n 80 "$f"
-	done < <(find "$owrt/logs" -type f -name '*.txt' \
-		\( -path "*${failed:-/no-such-directory}*" -o -mmin -20 \) \
-		2>/dev/null | head -20)
-	[ "$found" -eq 1 ] || echo "    (nothing in $owrt/logs matched)"
+	# The tree does not always leave a log to read: the failure of `target/linux`
+	# after the toolchain builds writes nothing to logs/ at all -- the directory does
+	# not even exist -- and the only trace left is what make printed.  Print that
+	# too, always, because throwing away the one artefact the runner still has is
+	# how a failure becomes "a directory failed to build" and nothing else.
+	echo
+	echo "--- the last 30 lines make printed"
+	tail -n 30 "$log"
 }
 
 echo "==> Seeding $CFG"
@@ -307,6 +315,42 @@ if [ "$WITH_PACKAGES" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# The target kernel config must not ask for modules whose sources this repository
+# does not carry.  This is what killed run 38635021287: 0006 and 0007 used to be
+# steps 6 and 7 of the default series, so even the M2 build -- the one that is
+# supposed to hold no optical and no xPON code at all -- put CONFIG_XPON=m,
+# CONFIG_XPON_OMCI=m, CONFIG_XPON_OAM=m, CONFIG_PHY_AIROHA_XPON=m,
+# CONFIG_AIROHA_XPON_V1=m and CONFIG_OPTICAL_FRONTEND=m into
+# target/linux/airoha/en7523/config-6.18.  The kernel then went looking for
+# net/xpon/ and drivers/net/optical/, which exist only in the community
+# airoha_en7523_all branch, and `make target/linux/compile` died eighteen seconds
+# in -- after forty-four minutes of toolchain work, with the reason in no log on
+# the runner.  They live in openwrt/pon/buildroot-patches/ now and only --with-pon
+# applies them.  Checking the config here costs nothing and fails while the
+# toolchain has not been built yet.
+# ---------------------------------------------------------------------------
+check_target_kernel_config() { # check_target_kernel_config <config-file> <with-pon>
+	local kcfg="$1" with_pon="$2" absent
+	[ "$with_pon" = "1" ] && return 0
+	[ -f "$kcfg" ] || return 0
+	absent=$(grep -E '^CONFIG_(XPON|XPON_OMCI|XPON_OAM|PHY_AIROHA_XPON|AIROHA_XPON_V1|OPTICAL_FRONTEND)=' "$kcfg" || true)
+	[ -n "$absent" ] || return 0
+	echo "!! the target kernel config asks for modules that are not in this repository:" >&2
+	printf '%s\n' "$absent" | sed 's/^/    /' >&2
+	cat >&2 <<'EOF'
+   net/xpon/** and drivers/net/optical/** come from the community
+   airoha_en7523_all branch.  The kernel stage would fail looking for them about
+   twenty seconds in, with the reason in no log at all.  Those symbols belong to
+   openwrt/pon/buildroot-patches/0006 and 0007, which only --with-pon applies: a
+   build without --with-pon must not set any of them.
+EOF
+	return 1
+}
+
+KCFG="$OWRT/target/linux/$TARGET/$SUBTARGET/config-$KERNEL_SERIES"
+check_target_kernel_config "$KCFG" "$WITH_PON" || exit 1
+
+# ---------------------------------------------------------------------------
 # (4) Build
 # ---------------------------------------------------------------------------
 echo
@@ -353,6 +397,15 @@ EOF
    failure here.  Fix the symbol, or pass --no-packages if you really want the
    bare image.
 EOF
+	# The `full` variant seeds the optical and xPON packages, and those are declared
+	# by openwrt/pon/buildroot-patches/0006-0007, which only --with-pon applies.  Say
+	# so, rather than leaving the reader to work out why the names vanished.
+	if [ "$WITH_PON" != "1" ] && [ "$VARIANT" = "full" ]; then
+		echo
+		echo "   This is the 'full' variant: it seeds kmod-optical-frontend and the five" >&2
+		echo "   xPON kmods, which the default series does not declare.  Add --with-pon," >&2
+		echo "   or use --variant m2, whose package set needs neither." >&2
+	fi
 	exit 1
 fi
 echo "    all $(grep -c . "$SEEDED") symbol(s) present"

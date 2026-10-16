@@ -35,13 +35,19 @@ build.
   a partition to write to, and `etc/board.d/02_network`, which bridges the switch
   ports.
 * **Route-A xPON/optical work** (`openwrt/pon/`, `openwrt/omci/`,
-  `openwrt/patches/0007-*`): the upstream-side pieces are applied by default -- the
-  `930-55`..`930-59` Kconfig/Makefile hooks, the `940-01`..`940-06` Ethernet/PCS
-  port, and the `omci-agent` / `luci-app-omci` control plane. The nine patches that
-  touch the community xPON sources themselves (`930-60`, `950-01`..`950-08`) live in
-  `openwrt/pon/patches-6.18/` and need `--with-pon` **and** the
-  `airoha_en7523_all` sources, which this repository does not carry -- which is why
-  they are not in the default series; see [pon-port.md](docs/pon-port.md). Measured
+  `openwrt/pon/buildroot-patches/0007-*`): the control plane (`omci-agent`,
+  `luci-app-omci`) is applied by default, and so is the `940-01`..`940-06`
+  Ethernet/PCS port that the board's 4xGbE needs. The kernel side of the xPON stack
+  is not: the `930-55`..`930-59` Kconfig/Makefile hooks, the symbol selection and
+  the kmod packages (`buildroot-patches/0006`-`0007`), and the nine patches that
+  touch the community xPON sources themselves (`930-60`, `950-01`..`950-08`) need
+  `--with-pon` **and** the `airoha_en7523_all` sources, which this repository does
+  not carry. That is deliberate and load-bearing: the default series sets no
+  `CONFIG_XPON`, `CONFIG_XPON_OMCI`, `CONFIG_PHY_AIROHA_XPON`, `CONFIG_AIROHA_XPON_V1`
+  or `CONFIG_OPTICAL_FRONTEND`, so an M2 image carries no optical and no xPON code at
+  all. It used to set all six, and the kernel then tried to build `net/xpon/` and
+  `drivers/net/optical/` -- sources that are not here -- and died eighteen seconds
+  into `make target/linux/compile`; see [pon-port.md](docs/pon-port.md). Measured
   on the author's own tree, which did carry those sources: 7 modules that self-load,
   the driver probes, GPON reaches O1->O2, downstream unresolved. Unit identity is
   redacted (placeholders in git, real serial from flash, empty password).
