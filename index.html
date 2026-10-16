@@ -10,22 +10,19 @@
 </style>
 </head>
 <body>
-<h1>Kernel modules for the Econet vGP-42X6V1</h1>
+<h1>Packages for the Econet vGP-42X6V1</h1>
 <p>
- OpenWrt's <code>airoha/en7523</code> target is <code>source-only</code>, so no
- <code>kmods/</code> directory is published for this board and a kernel module
- cannot be installed from downloads.openwrt.org.  This branch carries a
- repository per release instead.  Userspace packages are unaffected: they come
- from the generic <code>aarch64_cortex-a53</code> feeds as usual.
+ OpenWrt's <code>airoha/en7523</code> target is <code>source-only</code>, so
+ OpenWrt publishes no package feed for this board and a kernel module cannot be
+ installed from downloads.openwrt.org.  This branch carries a repository per
+ release instead, holding the target's own packages and the kernel modules built
+ against that release's kernel.  Userspace packages are unaffected: they come
+ from the generic <code>arm_cortex-a7</code> feeds as usual.
 </p>
-<p>
- <strong>No release has been published yet.</strong>  This page is a placeholder
- that the first release overwrites.  Until then there is nothing here to point
- apk at.
-</p>
-<p>
- <a href="https://github.com/realldz/econet-42x6-openwrt/releases">Releases</a> --
- <a href="https://github.com/realldz/econet-42x6-openwrt/blob/main/docs/packages.md">docs/packages.md</a>
-</p>
+<p><a href="releases.json">releases.json</a> lists every published release with
+ its kernel and the sha256 of its images.</p>
+<p>Most recently built: <a href="v0.1.0-m2/install.md">v0.1.0-m2</a>.</p>
+<p><strong>A module only loads into the kernel it was built against.</strong>
+ Match the release tag in the URL to the image you are running.</p>
 </body>
 </html>
