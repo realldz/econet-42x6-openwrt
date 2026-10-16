@@ -180,6 +180,32 @@ case "$out" in
 	*)	echo "  FAIL an empty logs/ directory was reported as having content: $out"; fails=$((fails + 1)) ;;
 esac
 
+echo "== the failure report re-runs the failing directory, because logs/ is not written"
+# logs/ only exists when CONFIG_BUILD_LOG=y, whose prompt is `if DEVEL`, so a release
+# build has none -- and then the report would end on thirty lines of
+# `make[3] -C foo compile`, which is not a reason.  The re-run is what a person does
+# by hand; it must be announced, must be skippable, and must not fail the report.
+mkdir -p "$FAKE/target/linux"
+out=$(report_build_failure "$WORK/make-output.txt" "$FAKE" 2>&1)
+case "$out" in
+	*"re-running 'target/linux' with V=s"*)
+		echo "  ok   the failing directory is re-run with V=s" ;;
+	*)	echo "  FAIL the re-run was not announced: $out"; fails=$((fails + 1)) ;;
+esac
+out=$(BUILD_LOG_RERUN=0 report_build_failure "$WORK/make-output.txt" "$FAKE" 2>&1)
+case "$out" in
+	*"re-running"*)
+		echo "  FAIL BUILD_LOG_RERUN=0 still re-ran the directory"; fails=$((fails + 1)) ;;
+	*)	echo "  ok   BUILD_LOG_RERUN=0 suppresses it" ;;
+esac
+out=$(report_build_failure "$WORK/make-output.txt" "$WORK/no-such-tree" 2>&1)
+case "$out" in
+	*"re-running"*)
+		echo "  FAIL a tree that has no such directory still tried to re-run it"
+		fails=$((fails + 1)) ;;
+	*)	echo "  ok   a directory that is not there is not re-run" ;;
+esac
+
 echo "== the target kernel config, when it asks for modules this repo does not carry"
 # Run 38635021287 died eighteen seconds into `target/linux/compile` because
 # config-6.18 asked for net/xpon/ and drivers/net/optical/, which only exist in the

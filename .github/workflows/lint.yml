@@ -78,6 +78,17 @@ jobs:
           # OpenWrt tree.
           tools/test_build_firmware.sh
 
+      - name: The Kconfig source checker names dangling sources
+        run: |
+          # It exists because two patch series sources reached a release build --
+          # net/Kconfig sourcing net/xpon/Kconfig and drivers/net/Kconfig sourcing
+          # drivers/net/optical/Kconfig, both community-only -- and kconfig stopped on
+          # the first of them twenty seconds into the kernel's configure step, after
+          # the toolchain had been built, with no reason in the log.  A checker that
+          # misses one is worse than none, and one that reports the kernel's own
+          # `source "arch/$(SRCARCH)/Kconfig"` is noise that hides the real hit.
+          PYTHON=python3 tools/test_check_kernel_sources.sh
+
       - name: ShellCheck
         run: |
           sudo apt-get update -qq

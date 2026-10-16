@@ -227,6 +227,22 @@ report_build_failure() { # report_build_failure <captured-make-output> <owrt-tre
 	echo
 	echo "--- the last 30 lines make printed"
 	tail -n 30 "$log"
+	# ...and thirty lines of `make[3] -C foo compile` is not a reason.  logs/ would
+	# hold one, but it is only written when CONFIG_BUILD_LOG=y, whose prompt is
+	# `if DEVEL` -- and CONFIG_DEVEL must not be set for a release image, so seeding
+	# CONFIG_BUILD_LOG does not survive make defconfig (the seed gate says so, and
+	# that is how this was found).  The reason is still obtainable: re-run the one
+	# directory that failed with V=s, which is what a person does by hand.  The
+	# kernel's configure step, the case this was written for, fails in twenty
+	# seconds, so it is cheap there and bounded everywhere else.
+	if [ -n "${failed:-}" ] && [ -d "$owrt/$failed" ] && [ "${BUILD_LOG_RERUN:-1}" = "1" ]; then
+		local runner=""
+		command -v timeout >/dev/null 2>&1 && runner="timeout 900"
+		echo
+		echo "--- re-running '$failed' with V=s, because there is no logs/ to read"
+		echo "    (CONFIG_BUILD_LOG only has a prompt when CONFIG_DEVEL is set)"
+		( cd "$owrt" && $runner make -C "$failed" compile V=s 2>&1 | tail -n 80 ) || true
+	fi
 }
 
 echo "==> Seeding $CFG"
@@ -284,6 +300,16 @@ fi
 # ---------------------------------------------------------------------------
 set_cfg "CONFIG_KERNEL_DEVTMPFS" "y"
 set_cfg "CONFIG_KERNEL_DEVTMPFS_MOUNT" "y"
+
+# ---------------------------------------------------------------------------
+# Do *not* seed CONFIG_BUILD_LOG here.  It looks like the answer -- OpenWrt writes
+# each sub-build's output to logs/ when it is set, which is what the log upload and
+# report_build_failure() both want -- but its prompt is `bool "..." if DEVEL`, so
+# without CONFIG_DEVEL make defconfig drops it, and the post-defconfig gate then
+# reports the symbol this script itself wrote.  Measured: that is exactly what
+# happened when it was tried.  CONFIG_DEVEL is not acceptable in a release image.
+# On failure the script re-runs the failing directory with V=s instead.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # (2c) Packages

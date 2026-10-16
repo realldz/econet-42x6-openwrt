@@ -83,6 +83,18 @@ jobs:
             scripts/build-firmware.sh "$OWRT_DIR" --variant m2 --no-packages --no-feeds \
               -j "$(nproc)"
 
+      - name: Every Kconfig source in the prepared kernel resolves
+        # Applying is not the same as being consistent.  930-55 and 930-53 applied
+        # cleanly and then added `source "net/xpon/Kconfig"` and
+        # `source "drivers/net/optical/Kconfig"` to net/Kconfig and drivers/net/Kconfig,
+        # and those files only exist in the community airoha_en7523_all branch.  kconfig
+        # stopped on the first of them twenty seconds into `make target/linux/compile`,
+        # after the toolchain had been built, and the log held no reason: run
+        # 38931458568, 38 minutes in.  This checks what kconfig resolves, in a second.
+        run: |
+          set -e
+          python3 tools/check_kernel_sources.py "$OWRT_DIR" --owrt
+
       - name: Upload the build logs
         if: failure()
         uses: actions/upload-artifact@v4
