@@ -7,11 +7,14 @@ rewrite*, not vendor code. The vendor firmware's own `xpon.ko` is not a
 shortcut: it targets kernel 4.4.115, so its ABI does not match 6.18.
 
 **Route A in one paragraph:** the xPON stack is ported into OpenWrt as a
-normal kernel patch series that OpenWrt applies by itself during the build
-(`930-55`..`930-60` hook the new subsystems in, `940-01`..`940-06` port the
-Ethernet/PCS glue, `950-xx` carry the EN7523 bring-up fixes), selected by
-`openwrt/pon/buildroot-patches/0007-*`, applied only with `--with-pon`, and described by the board device tree
-(`en7523-vgp42x6v1.dts` + `en7523-vgp42x6v1-pon.dtsi`). There is no separate
+normal kernel patch series that OpenWrt applies by itself during the build.
+`940-01`..`940-06` port the Ethernet/PCS glue and stay in the default series;
+the sixteen patches that need the community xPON sources -- the `930-53`..`930-60`
+hooks and the `950-01`..`950-08` EN7523 bring-up guards -- live in
+`patches-6.18/` here and are applied only with `--with-pon`, as are the symbol
+selection and the kmod packages in `openwrt/pon/buildroot-patches/0006-0007`.
+The board device tree describes the hardware (`en7523-vgp42x6v1.dts` +
+`en7523-vgp42x6v1-pon.dtsi`). There is no separate
 clone to fetch and no hand-applied hook step anymore. What still does not
 work is the link itself: the driver probes on hardware but GPON stays
 pre-O5 (downstream unresolved) -- see [docs/pon-port.md](../../docs/pon-port.md).
@@ -20,7 +23,7 @@ pre-O5 (downstream unresolved) -- see [docs/pon-port.md](../../docs/pon-port.md)
 
 | Piece | Location | Applied/selected by |
 |---|---|---|
-| xPON Kconfig/Makefile hooks (`net/`, `drivers/net/ethernet/airoha/`, `drivers/phy/airoha/`) | `../overlay/target/linux/airoha/patches-6.18/930-55`..`930-59` | OpenWrt, during the build |
+| xPON Kconfig/Makefile hooks (`net/`, `drivers/net/`, `drivers/net/ethernet/airoha/`, `drivers/phy/airoha/`) | `patches-6.18/930-53`..`930-59` | `--with-pon` (two of them source `Kconfig` files only the community sources carry) |
 | `MODULE_LICENSE` for `net/xpon/oam` | `patches-6.18/930-60` | `--with-pon` (needs the community sources) |
 | Ethernet/PCS port (`airoha_eth` hooks, NPU shim, PCS API, `airoha_wed.h` forward decl.) | `.../patches-6.18/940-01`..`940-06` + `overlay/drivers/net/ethernet/airoha/airoha_wed.h` (via `apply-pon.sh`) | OpenWrt + `scripts/apply-overlay.sh` |
 | EN7523 bring-up guards (SCU clock-domain reset, undecoded-register guards, stop-before-PLOAM, disable-path breadcrumbs, LOS-from-ready) | `patches-6.18/950-01`..`950-08` | `--with-pon` (needs the community sources) |
@@ -45,7 +48,7 @@ of `airoha_eth.c` includes it while this kernel has no `mtk_wed_private.h`).
 Run it through `scripts/apply-overlay.sh`; it needs no arguments beyond the
 OpenWrt tree.
 
-### Why nine patches need `--with-pon`
+### Why the sixteen patches need `--with-pon`
 
 `930-60` and `950-01`..`950-08` modify files that **this repository does not
 carry**: `net/xpon/**`, `airoha_xpon.[ch]`, `phy-airoha-xpon.c` and
@@ -61,11 +64,20 @@ Patch failed!  Please fix .../950-01-...patch!
 ```
 
 which stops `make target/linux/prepare` about twenty seconds in. Both jobs of CI
-run 38616337395 died on exactly that after 47 and 81 minutes of toolchain work, and
-that is why the default series is now `930-55`..`930-59` + `940-01`..`940-06`, with
-the xPON ones in `patches-6.18/`. Without the community sources, `--with-pon` does
-not make them apply -- it only decides where the build stops, which is the honest
-behaviour for material this repository cannot ship.
+run 38616337395 died on exactly that after 47 and 81 minutes of toolchain work.
+
+`930-53`..`930-59` are the other seven. They do edit upstream files, but `930-53`
+and `930-55` make `drivers/net/Kconfig` and `net/Kconfig` source
+`drivers/net/optical/Kconfig` and `net/xpon/Kconfig`, and those directories exist
+only in the same community branch: kconfig stops at the first of them twenty
+seconds into the kernel's configure step, which is why they left the default series
+as well.
+
+Without the community sources, `--with-pon` does not make any of the sixteen
+apply -- it only decides where the build stops, which is the honest behaviour for
+material this repository cannot ship. The default series is the 22 patches that
+touch files which exist upstream: `100`, `110`, `202-29`, `202-30`, `610-42x6`,
+`930-42`..`930-52` and `940-01`..`940-06`.
 
 ## 2. Apply-order rule that bit us
 
@@ -79,7 +91,8 @@ overlay list.
 
 `reference/010`..`033` were the first-generation hook patches (hand-applied
 to a prepared kernel tree). `930-55`..`930-58` (plus `930-53`/`930-54` for
-optical) supersede them with the same hunks; nothing applies the old ones
+optical) supersede them with the same hunks; all of those now live in
+`patches-6.18/` behind `--with-pon`, and nothing applies the old ones
 anymore. `reference/ref-*` are third-party comparison patches, kept for
 evidence, never applied.
 

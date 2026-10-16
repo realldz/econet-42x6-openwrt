@@ -38,11 +38,12 @@ build.
   `openwrt/pon/buildroot-patches/0007-*`): the control plane (`omci-agent`,
   `luci-app-omci`) is applied by default, and so is the `940-01`..`940-06`
   Ethernet/PCS port that the board's 4xGbE needs. The kernel side of the xPON stack
-  is not: the `930-55`..`930-59` Kconfig/Makefile hooks, the symbol selection and
-  the kmod packages (`buildroot-patches/0006`-`0007`), and the nine patches that
-  touch the community xPON sources themselves (`930-60`, `950-01`..`950-08`) need
-  `--with-pon` **and** the `airoha_en7523_all` sources, which this repository does
-  not carry. That is deliberate and load-bearing: the default series sets no
+  is not: sixteen patches in `openwrt/pon/patches-6.18/` -- the `930-53`..`930-59`
+  Kconfig/Makefile hooks and the nine that touch the community xPON sources
+  themselves (`930-60`, `950-01`..`950-08`) -- plus the symbol selection and the
+  kmod packages (`buildroot-patches/0006`-`0007`) need `--with-pon` **and** the
+  `airoha_en7523_all` sources, which this repository does not carry. That is
+  deliberate and load-bearing: the default series sets no
   `CONFIG_XPON`, `CONFIG_XPON_OMCI`, `CONFIG_PHY_AIROHA_XPON`, `CONFIG_AIROHA_XPON_V1`
   or `CONFIG_OPTICAL_FRONTEND`, so an M2 image carries no optical and no xPON code at
   all. It used to set all six, and the kernel then tried to build `net/xpon/` and
@@ -357,10 +358,11 @@ openwrt/
     package/kernel/mt76/patches/            the three WLAN LED patches
     package/kernel/{pciedbg,ringwatch}/     diagnostic kernel modules
   dbg/              diagnostic patches for --with-mt76-debug, never shipped
-  pon/              route-A xPON staging (airoha_wed.h stub) + README
+  pon/              route-A xPON staging (airoha_wed.h stub) + README;
+                    patches-6.18/ holds the sixteen xPON kernel patches
   omci/             omci-agent + luci-app-omci + canonical UAPI + apply-omci.sh
-  patches/          applied with `git apply` to existing upstream files
-                    (0007-* selects the xPON symbols and kmod packages)
+  pon/buildroot-patches/  optical-frontend and xPON symbols + kmod packages
+                    (0006-0007); both pon patch sets need `--with-pon`
   optional-configs/ example files you can opt into, e.g. a pinned wireless config
 scripts/            pin.env, apply-overlay.sh, build-firmware.sh,
                     packages.append + packages-m2.append, publish-packages.sh

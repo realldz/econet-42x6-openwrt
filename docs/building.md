@@ -91,20 +91,27 @@ This does four things:
    (`package/kernel/mt76/patches/`) and the diagnostic kernel modules;
 3. optionally copies `openwrt/dbg/` with `--with-mt76-debug` -- one diagnostic
    mt76 patch that prints ring base addresses and must never ship;
-4. with `--with-pon`, adds the nine xPON patches from `openwrt/pon/patches-6.18/`
-   to the kernel series **and** applies `openwrt/pon/buildroot-patches/0006` and
-   `0007`. Those patch `net/xpon/**`, `airoha_xpon.[ch]`, `phy-airoha-xpon.c` and
-   `airoha_gpon_omci.c`, which come from the community `airoha_en7523_all` branch
-   and are **not** in this repository, so the flag is only useful in a tree that has
-   them; without them the kernel stage stops at the first of the nine
-   (`can't find file to patch`). 0006 and 0007 are what switch the kernel symbols on
-   and declare the kmod packages, and they are the reason the default series sets no
-   `CONFIG_XPON`, `CONFIG_XPON_OMCI`, `CONFIG_XPON_OAM`, `CONFIG_PHY_AIROHA_XPON`,
+4. with `--with-pon`, adds the sixteen xPON patches from
+   `openwrt/pon/patches-6.18/` to the kernel series **and** applies
+   `openwrt/pon/buildroot-patches/0006` and `0007`. Nine of the sixteen patch
+   `net/xpon/**`, `airoha_xpon.[ch]`, `phy-airoha-xpon.c` and `airoha_gpon_omci.c`,
+   which come from the community `airoha_en7523_all` branch and are **not** in this
+   repository, so the flag is only useful in a tree that has them; without them the
+   kernel stage stops at the first of the nine (`can't find file to patch`). The
+   other seven are the `930-53`..`930-59` hooks: they edit upstream `Kconfig` and
+   `Makefile` files, but `930-53` and `930-55` add `source
+   "drivers/net/optical/Kconfig"` and `source "net/xpon/Kconfig"`, directories that
+   exist only in that branch, so kconfig stops there twenty seconds into the
+   kernel's configure step. 0006 and 0007 are what switch the kernel symbols on and
+   declare the kmod packages, and between them the sixteen kernel patches and those
+   two buildroot patches are the reason the default series sets no `CONFIG_XPON`,
+   `CONFIG_XPON_OMCI`, `CONFIG_XPON_OAM`, `CONFIG_PHY_AIROHA_XPON`,
    `CONFIG_AIROHA_XPON_V1` or `CONFIG_OPTICAL_FRONTEND` at all: an M2 image carries
    no optical and no xPON code, and `build-firmware.sh` refuses to start if any of
-   those six symbols is set without the flag. The default series is
-   `940-01`..`940-06` plus `930-55`..`930-59` minus nothing, which touch upstream
-   files only, and that is what a release image is built from.
+   those six symbols is set without the flag. The default series is 22 patches --
+   `100`, `110`, `202-29`, `202-30`, `610-42x6`, `930-42`..`930-52` and
+   `940-01`..`940-06` -- and every one of them touches a file that exists upstream,
+   which is what a release image is built from.
 
 It refuses to run if the tree is not at the pinned revision, and each patch is
 checked with `--reverse --check` before it is applied, so a run that failed halfway
@@ -252,13 +259,13 @@ Useful flags:
 |---|---|
 | `--initramfs` | also emit `*-initramfs-kernel.bin` (the RAM-boot image); this is the default |
 | `--no-initramfs` | skip it -- use this when you only want the persistent image, see the warning below |
-| `--variant m2` | seed `scripts/packages-m2.append`: Ethernet, Wi-Fi, LuCI and apk, with no optical/xPON/OMCI -- and, since 0006/0007 left the default series, no `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol either, so the kernel is not asked for sources that are not here. This is the shape of a release image. |
+| `--variant m2` | seed `scripts/packages-m2.append`: Ethernet, Wi-Fi, LuCI and apk, with no optical/xPON/OMCI -- and, since the `930-53`..`930-59` hooks and `0006`/`0007` left the default series, no `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol either, so the kernel is not asked for sources that are not here. This is the shape of a release image. |
 | `--variant full` | seed `scripts/packages.append`: the same plus the optical frontend and the xPON/OMCI stack, which need the per-unit BOB blob -- and, because those kmod packages are declared by `0006`/`0007`, `--with-pon` as well; without it the seed dies at the post-defconfig gate. This is the default. |
 | `--packages FILE` | seed `FILE` instead of either list |
 | `--debug-kmods` | install `kmod-pciedbg` and `kmod-ringwatch` into the image |
 | `--no-packages` | seed no package list at all into `.config` |
 | `--no-feeds` | do not run `./scripts/feeds update -a` / `install -a` first |
-| `--with-pon` | also add the nine xPON patches from `openwrt/pon/patches-6.18/` and `0006`/`0007` from `openwrt/pon/buildroot-patches/`, all of which need the community xPON sources as well (not in this repository); without it no `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol is set at all |
+| `--with-pon` | also add the sixteen kernel patches from `openwrt/pon/patches-6.18/` (the `930-53`..`930-60` hooks and `950-01`..`950-08`) and `0006`/`0007` from `openwrt/pon/buildroot-patches/`, all of which need the community xPON sources as well (not in this repository); without it no `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol is set at all |
 | `--mt76-debug` | also apply the diagnostic mt76 ring patch (never ship it) |
 | `--imagebuilder` | also produce the Image Builder tarball |
 | `--no-apply` | skip step 2, if the overlay is already in the tree |
@@ -447,8 +454,10 @@ the first CI run paid for it by failing 20 seconds in, with no detail in the log
 because the build script suppresses git's stderr.
 
 Patches 0001-0004 are generated by `scripts/make-patches.py generate`; 0005, 0006
-and 0007 are written by hand, so when you edit one of those, run the check above
-before pushing.
+and 0007 are written by hand, so when you edit one of those, check it before
+pushing -- with the tool above for 0005, which is in `openwrt/patches/`, and with a
+`--with-pon` run against a scratch tree for 0006 and 0007, which now live in
+`openwrt/pon/buildroot-patches/` and are outside what that check replays.
 
 To regenerate one of those three, do not edit the patch file: edit the tree. Copy
 the pin, apply the series up to the patch *before* the one you are changing, make

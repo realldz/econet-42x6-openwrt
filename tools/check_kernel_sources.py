@@ -138,7 +138,7 @@ def main() -> int:
         print("   under net/xpon/ or drivers/net/optical/ belongs to the community")
         print("   airoha_en7523_all branch, which this repository does not carry: the")
         print("   patch that adds it belongs in openwrt/pon/patches-6.18/ and needs")
-        print("   --with-pon.  See docs/ci.md, trap 10.")
+        print("   --with-pon.  See docs/ci.md, trap 11.")
         return 1
     if args.quiet_obj:
         print(f"ok: {kc} Kconfig file(s), every source path resolves")

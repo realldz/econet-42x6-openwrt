@@ -36,7 +36,7 @@ in.
 | [sysupgrade.md](sysupgrade.md) | Persistent install: `MTD_BLOCK` and devtmpfs, `platform.sh`, writing slot B, which regions are safe to write, and what survives an upgrade |
 | [image-builder.md](image-builder.md) | Why the upstream Image Builder cannot build this board, and how to produce and use this project's own |
 | [packages.md](packages.md) | The prebuilt images, why kernel modules cannot come from OpenWrt, and the apk repository published per release |
-| [ci.md](ci.md) | What runs on GitHub and when, why a release is two builds, every gate before publishing, dispatching a release, and the eight traps that cost a run each |
+| [ci.md](ci.md) | What runs on GitHub and when, why a release is two builds, every gate before publishing, dispatching a release, and the eleven traps that cost a run each |
 
 ## Background
 

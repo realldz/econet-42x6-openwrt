@@ -561,7 +561,10 @@ accident -- which is also why the exact bytes are not quoted here.
    invisible to the build until `drivers/net/Kconfig` sources it and `drivers/net/Makefile` descends into it,
    even though `target/linux/<target>/files/` already contains the source (that overlay is copied *before*
    patches are applied, which is why the files exist but nothing gets built). Handled by `930-53` (Kconfig) and
-   `930-54` (Makefile), one hunk each against upstream context.
+   `930-54` (Makefile), one hunk each against upstream context. Both now live in `openwrt/pon/patches-6.18/`
+   and are applied only with `--with-pon` (section 15), together with the rest of the `930-53`..`930-59` hooks,
+   because `930-53` adds `source "drivers/net/optical/Kconfig"` and that directory exists only in the
+   community `airoha_en7523_all` branch.
 2. **`=m` kernel symbols need an explicit kmod package.** `CONFIG_I2C=m` in the target clamps
    `AIROHA_LDDLA_PHY` to `=m`, and a bare `=m` symbol only produces a `.ko` inside the kernel tree -- no
    package installs it into the rootfs. Both packages are declared in `target/linux/airoha/modules.mk`
@@ -618,20 +621,32 @@ build and the probe; `[not verified]` for anything past that.
 The earlier plan (a hand-applied shim header plus six hook patches) is
 retired. Instead the xPON stack is ported the way OpenWrt expects: a patch
 series under `openwrt/overlay/target/linux/airoha/patches-6.18/` that the
-build applies by itself, plus symbol selection in `openwrt/pon/buildroot-patches/0007-*`,
-which `--with-pon` applies.
+build applies by itself, plus the xPON-only patches in
+`openwrt/pon/patches-6.18/` and symbol selection in
+`openwrt/pon/buildroot-patches/0007-*`, which `--with-pon` applies.
 
-`930-60` and `950-01`..`950-08` are **not** part of that default series: they
-modify `net/xpon/**`, `airoha_xpon.[ch]`, `phy-airoha-xpon.c` and
-`airoha_gpon_omci.c`, which this repository does not carry (they come from the
-community `airoha_en7523_all` branch and were in the author's local tree). Applied
-to a clean tree they do not apply at all -- `can't find file to patch` -- and that
-is what stopped the release pipeline. They live in `openwrt/pon/patches-6.18/` and
-need `scripts/apply-overlay.sh --with-pon`, together with those sources.
+No `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol is part of the default
+series. Sixteen patches live in `openwrt/pon/patches-6.18/` and need
+`scripts/apply-overlay.sh --with-pon`, together with the community sources:
+
+* `930-60` and `950-01`..`950-08` modify `net/xpon/**`, `airoha_xpon.[ch]`,
+  `phy-airoha-xpon.c` and `airoha_gpon_omci.c`, which this repository does not
+  carry (they come from the community `airoha_en7523_all` branch and were in the
+  author's local tree). Applied to a clean tree they do not apply at all --
+  `can't find file to patch` -- and that is what stopped the release pipeline
+  (run 38616337395).
+* `930-53`..`930-59` are the Kconfig/Makefile hooks. They edit upstream files, but
+  `930-53` and `930-55` make the kernel's own Kconfig `source`
+  `drivers/net/optical/Kconfig` and `net/xpon/Kconfig`, which exist only in that
+  branch, so kconfig stopped on the first of them twenty seconds into the kernel's
+  configure step. They left the default series along with the nine.
+
+The default series is 22 patches -- `100`, `110`, `202-29`, `202-30`, `610-42x6`,
+`930-42`..`930-52` and `940-01`..`940-06` -- and every one of them touches a file
+that exists upstream. The route-A pieces in it are:
 
 | Series | Contents |
 |---|---|
-| `930-55`..`930-59` | Kconfig/Makefile hooks for `net/xpon`, `drivers/net/ethernet/airoha` and `drivers/phy/airoha` |
 | `940-01` | `airoha_eth.c`/`.h`/`airoha_regs.h` brought to the community baseline `781502ce` -- the rewrite closest to this tree, so every existing OpenWrt patch still applies |
 | `940-02` | `airoha_npu_start()` shim: keeps caller semantics, does nothing (upstream loads NPU firmware in probe; the fork's split load is not ported) |
 | `940-03` | two multi-PCS hunks back-ported to this tree's earlier API (`fwnode_phylink_pcs_parse()` takes the count by value; no `num_available_pcs` field) |

@@ -5,9 +5,10 @@
 #   ./apply-pon.sh /path/to/openwrt
 #
 # Route A: most of the xPON material is a kernel patch series
-# (openwrt/overlay/target/linux/airoha/patches-6.18/ 930-55..59, 940-01..06,
-# enabled by openwrt/pon/buildroot-patches/0007-*, which --with-pon applies).
-# build.  This script stages the files that cannot live in patches-6.18:
+# (openwrt/overlay/target/linux/airoha/patches-6.18/ 940-01..06, plus the
+# sixteen xPON patches in openwrt/pon/patches-6.18/ and the symbols and kmod
+# packages in openwrt/pon/buildroot-patches/0006-0007, all with --with-pon).
+# This script stages the files that cannot live in patches-6.18:
 #
 #   openwrt/pon/overlay/drivers/net/ethernet/airoha/airoha_wed.h
 #     - included by airoha_eth.c (route-A baseline), absent from this kernel;
@@ -39,16 +40,18 @@ echo "    $n route-A overlay file(s) copied"
 cat <<EOF
 
 ==> Route-A kernel patches apply by themselves.
-    The 930-55..59 / 940-01..06 series already lives in
+    The 940-01..06 series already lives in
     target/linux/airoha/patches-6.18/ (copied by scripts/apply-overlay.sh),
-    and openwrt/pon/buildroot-patches/0007-* selects the symbols and declares the kmod
-    packages.  No manual hook patching is needed.
+    and openwrt/pon/buildroot-patches/0006-0007 select the symbols and declare the
+    kmod packages.  No manual hook patching is needed.
 
-    The xPON-only patches -- 930-60 and 950-01..08, which modify net/xpon/**
-    and the airoha_xpon / phy-airoha-xpon / airoha_gpon_omci files -- are in
+    The xPON-only patches -- 930-53..930-60 and 950-01..08 -- are in
     openwrt/pon/patches-6.18/ and are copied in only by
-    `scripts/apply-overlay.sh --with-pon`, because those files belong to the
-    community airoha_en7523_all branch and are not in this repository.  See
+    `scripts/apply-overlay.sh --with-pon`, because they patch, or make kconfig
+    source, files that belong to the community airoha_en7523_all branch and are
+    not in this repository: 930-60 and 950-01..08 modify net/xpon/** and the
+    airoha_xpon / phy-airoha-xpon / airoha_gpon_omci files, while 930-53/930-55
+    source drivers/net/optical/Kconfig and net/xpon/Kconfig.  See
     openwrt/pon/README.md.
 
 ==> NEXT STEPS (in order)

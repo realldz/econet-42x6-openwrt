@@ -66,9 +66,10 @@ else on this page refines a router that already works.
 **Where the work stands** `[hardware]`. M3 is done: `en7571` probes on `i2c0`
 at `0x70`, hwmon exposes temperature/voltage matching stock, BOB loads. M4
 moved to **route A**: the xPON stack is a normal kernel patch series
-(`930-55`..`930-59` hooks, `940-01`..`940-06` Ethernet/PCS port; `930-60` and
-`950-01`..`950-08` need `--with-pon` **and** the community `net/xpon` sources, which
-this repository does not carry), selected by `openwrt/pon/buildroot-patches/0007-*` (applied only with `--with-pon`) and
+(`940-01`..`940-06` Ethernet/PCS port in the default series; the `930-53`..`930-60`
+hooks and `950-01`..`950-08` need `--with-pon` **and** the community `net/xpon`
+sources, which this repository does not carry), selected by
+`openwrt/pon/buildroot-patches/0007-*` (applied only with `--with-pon`) and
 described by the board device tree. In a tree that also carries those sources it
 builds clean (7 modules, zero modpost errors), the modules self-load, the driver
 probes, OMCI userspace answers

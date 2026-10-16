@@ -9,8 +9,8 @@
 # instead of quietly producing a broken image.
 #
 # What it does:
-#   1. applies openwrt/patches/*.patch   (edits to existing upstream files;
-#                                         0007-* selects the xPON symbols)
+#   1. applies openwrt/patches/*.patch   (edits to existing upstream files:
+#                                         0001-0005, the default series)
 #   2. copies  openwrt/overlay/.         (new files: board DTS, kernel patches,
 #                                         mt76 package patches, base-files
 #                                         overlay, diagnostic kernel modules)
@@ -19,11 +19,11 @@
 #   4. always runs openwrt/pon/apply-pon.sh (route-A stub: airoha_wed.h) and
 #      openwrt/omci/apply-omci.sh (omci-agent + luci-app-omci, UAPI sync).
 #
-# --with-pon adds openwrt/pon/patches-6.18/ -- nine xPON patches that modify files
-# this repository does not carry, so the tree also needs the community
-# airoha_en7523_all sources.  Without that flag the tree builds without xPON, and
-# without those sources the flag alone only moves where the build stops.  See
-# docs/pon-port.md.
+# --with-pon adds openwrt/pon/patches-6.18/ -- sixteen xPON patches that patch,
+# or make kconfig source, files this repository does not carry -- and applies
+# openwrt/pon/buildroot-patches/0006-0007, which select the xPON symbols and
+# declare the packages: both need the community sources.  See docs/pon-port.md.
+# Without those sources, the flag alone only moves where the build stops.
 #
 # It is idempotent: re-running it on an already-patched tree succeeds.
 #
@@ -142,7 +142,7 @@ echo "    debug modules  package/kernel/{pciedbg,ringwatch}/  (built, not instal
 # ---------------------------------------------------------------------------
 owns="$REPO/openwrt/overlay/target/linux/$TARGET/patches-$KERNEL_SERIES"
 # The --with-pon series lands in the same directory, so it has to count as shipped
-# here too: otherwise every --with-pon run reports its own nine patches as stale.
+# here too: otherwise every --with-pon run reports its own sixteen patches as stale.
 owns_pon="$REPO/openwrt/pon/patches-$KERNEL_SERIES"
 stale=0
 # Only a patch that the tree's own git does not track and this repo does not ship
@@ -209,8 +209,12 @@ fi
 #
 #      and that stops `make target/linux/prepare` about twenty seconds in, which
 #      is what both jobs of CI run 38616337395 died on after 47 and 81 minutes of
-#      toolchain work.  They live in openwrt/pon/patches-6.18/ now and are copied
-#      in only with --with-pon, for somebody who has the community sources.
+#      toolchain work.  The other seven -- 930-53..930-59 -- do edit upstream
+#      files, but two of them make the kernel's Kconfig source net/xpon/Kconfig
+#      and drivers/net/optical/Kconfig, which only that branch has, so kconfig
+#      stops on the first of them twenty seconds into the kernel's configure step.
+#      All sixteen live in openwrt/pon/patches-6.18/ now and are copied in only
+#      with --with-pon, for somebody who has the community sources.
 # ---------------------------------------------------------------------------
 echo
 echo "==> route-A PON overlay (airoha_wed.h stub)"
@@ -224,11 +228,12 @@ if [ "$WITH_PON" = "1" ]; then
 		cp -a "$PON_PATCHES/." "$OWRT/target/linux/$TARGET/patches-$KERNEL_SERIES/"
 		ls -1 "$PON_PATCHES"
 		cat <<'EOF'
-    Added to the series.  They modify files this repository does not carry --
-    net/xpon/**, airoha_xpon.[ch], phy-airoha-xpon.c, airoha_gpon_omci.c -- so the
-    build only works if the community airoha_en7523_all sources are in the tree
-    too.  Without them the kernel stage stops at the first of these patches.  See
-    docs/pon-port.md.
+    Added to the series.  Nine of them modify files this repository does not carry
+    -- net/xpon/**, airoha_xpon.[ch], phy-airoha-xpon.c, airoha_gpon_omci.c -- and
+    two of the other seven make kconfig source net/xpon/Kconfig and
+    drivers/net/optical/Kconfig, so the build only works if the community
+    airoha_en7523_all sources are in the tree too.  Without them the kernel stage
+    stops at the first of these patches.  See docs/pon-port.md.
 EOF
 	fi
 

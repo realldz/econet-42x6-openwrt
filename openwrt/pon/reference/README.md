@@ -32,8 +32,10 @@ carry a `ref-` prefix to keep them apart from the ones we apply.
 `010`/`011` (net Kconfig/Makefile), `020`/`021` (drivers/net optical
 Kconfig/Makefile) and `032`/`033` (airoha Kconfig/Makefile) were the
 first-generation xPON hook patches, applied by hand to a prepared kernel
-tree. They are superseded by the route-A series in
-`../../overlay/target/linux/airoha/patches-6.18/` (`930-55`..`930-58` carry
-the same hunks; `930-53`/`930-54` carry the optical pair), which OpenWrt
-applies by itself during the build. They are kept here so the history stays
-readable, but nothing applies them anymore.
+tree. They are superseded by the route-A hooks -- `930-55`..`930-58` carry
+the same hunks and `930-53`/`930-54` carry the optical pair -- which now live
+in `../patches-6.18/` and are copied into the series only by
+`scripts/apply-overlay.sh --with-pon`, because two of them make kconfig
+source paths that only the community `airoha_en7523_all` branch carries.
+They are kept here so the history stays readable, but nothing applies them
+anymore.

@@ -51,7 +51,9 @@ hand every image it produces an initramfs-embedded kernel.
 | `tools/test_check_patches_apply.sh` | The gate above failing to fail. It plants a patch whose context does not exist and one shaped like the patch that broke this pipeline, and asserts both are refused by name. |
 | `tools/test_publish_packages.sh` | The package publisher's failure paths and both source layouts. 42 checks, no OpenWrt tree. It covers the case a real tree found and no fixture had: one kernel published under several version strings (`6.18.54`, `6.18.54.7.2`, `6.18.54.2026.09.01~be5ce791`), which an earlier publisher refused as "more than one kernel". |
 | `tools/test_build_firmware.sh` | `set_cfg`/`set_cfg_off`, the option parser, including `-jN`, the failure report itself, and `check_target_kernel_config`. |
-| `kernel-patches.yml` | The kernel patch series not applying, and a target kernel config that asks for modules this repository does not carry. This is the one gate that needs an OpenWrt tree and the one no check in this repository can replace: the series is applied *inside* the kernel build, against kernel sources, so `check_patches_apply.py` is blind to it by construction -- which is how nine patches that modified files the repository does not carry reached a release build. The job clones the tree, applies the overlay, and runs `BUILD_TARGET=target/linux/prepare`, which reaches the patches in about twenty seconds instead of forty minutes. Since the M2 fix it also runs the config check above, which is what would have caught the six xPON/optical symbols that made an M2 build ask for `net/xpon/`: 59 seconds on run 38931301958, against 44 minutes and an 18-second failure with no log. It does not compile the kernel, so it cannot catch a compile error. |
+| `tools/check_kernel_sources.py` | A `source` line in the prepared kernel's Kconfig that points at a path the tree does not have. It resolves every `source` in the prepared kernel, skips the kernel's own `$(SRCARCH)` lines, and fails naming the file and the line: 1888 Kconfig files, about one second. `kernel-patches.yml` runs it in a step named "Every Kconfig source in the prepared kernel resolves", immediately after `target/linux/prepare`. The config-symbol check above cannot see this class -- it inspects the contents of `config-6.18`, and a dangling `source` line is not a symbol. |
+| `tools/test_check_kernel_sources.sh` | The checker above failing to fail: 11 checks, including a planted dangling source that must be named by file and line, the kernel's own `$(SRCARCH)` line that must be left alone, and an OpenWrt tree with no prepared kernel, which is a usage error rather than a pass. `lint.yml` runs it. |
+| `kernel-patches.yml` | The kernel patch series not applying, and a target kernel config that asks for modules this repository does not carry. This is the one gate that needs an OpenWrt tree and the one no check in this repository can replace: the series is applied *inside* the kernel build, against kernel sources, so `check_patches_apply.py` is blind to it by construction -- which is how nine patches that modified files the repository does not carry reached a release build. The job clones the tree, applies the overlay, and runs `BUILD_TARGET=target/linux/prepare`, which reaches the patches in about twenty seconds instead of forty minutes. Since the M2 fix it also runs the config check above, which is what would have caught the six xPON/optical symbols that made an M2 build ask for `net/xpon/`: 59 seconds on run 38931301958, against 44 minutes and an 18-second failure with no log. It then runs the Kconfig source check above on the prepared tree, in about a second, which is what the config check could not see (trap 11). It does not compile the kernel, so it cannot catch a compile error. |
 | `tools/verify_build.py` | Run after the build: the FIT load and entry addresses must match where the kernel is linked, and the image must carry no debug breadcrumbs. |
 | `tools/verify_image.py` | Run after the build on the persistent image: a squashfs superblock must exist and start inside the kernel partition. This is the gate that keeps an unsplittable image out of a release. |
 
@@ -163,8 +165,8 @@ catches it locally:
    and it cost three runs, because the reason was in `logs/` rather than the
    terminal (see the next section) and because the local gate covers
    `openwrt/patches/`, which is applied to upstream files, and not the kernel
-   series. Those nine patches now live in `openwrt/pon/patches-6.18/` and need
-   `--with-pon`.
+   series. Those nine patches now live in `openwrt/pon/patches-6.18/` -- which
+   holds sixteen in all, see trap 11 -- and need `--with-pon`.
 
 10. An M2 build asked the kernel to build the xPON and optical modules. The package
     list was right -- `packages-m2.append` seeds fifteen packages and no `kmod-xpon`
@@ -195,6 +197,30 @@ catches it locally:
     image" is a claim about the *kernel config*, and a correct package list does not
     make it true.
 
+11. The default series made kconfig `source` two directories this repository does not
+    carry. Trap 10's fix removed the six symbols and the next run died the same way:
+    about twenty seconds into the kernel's configure step, after the toolchain was
+    built, with no reason in the log (run 38931458568, 38 minutes in). What had
+    changed was two lines in the kernel's own Kconfig:
+
+    ```
+    net/Kconfig:90:              source "net/xpon/Kconfig"
+    drivers/net/Kconfig:29:      source "drivers/net/optical/Kconfig"
+    ```
+
+    `930-55` adds the first and `930-53` the second, and `net/xpon/` and
+    `drivers/net/optical/` exist only in the community `airoha_en7523_all` branch, so
+    kconfig stopped at the first of them -- which is what twenty seconds of a kernel
+    stage means. Trap 10's check cannot see this class: it inspects the contents of
+    `config-6.18`, and a dangling `source` line is not a config symbol. Seven patches
+    therefore moved to the xPON set -- `930-53`..`930-59`, applied only with
+    `--with-pon` -- which leaves the default series at 22 patches, every one of them
+    touching a file that exists upstream, and takes the xPON symbols out of the
+    default tree, so an M2 build cannot select them even by accident. The gate that
+    fails on this input in about a second, naming the file and the line, is
+    `tools/check_kernel_sources.py`, run by `kernel-patches.yml` right after
+    `target/linux/prepare` (see the gate table above).
+
 ## When a build fails
 
 An OpenWrt parallel build writes each sub-build's output to `logs/` instead of the
@@ -207,20 +233,26 @@ make -r world: build failed. Please re-run make with -j1 V=s ...
 ```
 
 That line is true and useless, and it was the only thing three runs had to show
-for 47 to 81 minutes of work each. Two things now make the reason reach the log:
+for 47 to 81 minutes of work each. Three things now make the reason reach the log:
 `scripts/build-firmware.sh` keeps the make output, reads the failing directory out
-of that line, and prints the last 80 lines of the matching file in `logs/`; and the
-build job uploads `logs/` and `.config` as an artifact when it fails. The function
-that does the printing is `report_build_failure`, and
-`tools/test_build_firmware.sh` checks it against a fake tree.
+of that line, and prints the last 80 lines of the matching file in `logs/`; because
+OpenWrt writes `logs/` only when `CONFIG_BUILD_LOG=y` -- a prompt that is
+`bool "..." if DEVEL`, so a release image cannot set it -- it also re-runs that one
+directory with `make -C <dir> compile V=s` under `timeout 900` and prints the last
+80 lines of that; and the build job uploads `logs/` and `.config` as an artifact
+when it fails. The function that does the printing is `report_build_failure`, and
+`tools/test_build_firmware.sh` checks it against a fake tree; `BUILD_LOG_RERUN=0` in
+the environment turns the re-run off, which is what that test does.
 
 ## Limits
 
 * The kernel patch series in `openwrt/overlay/` is **not** covered by
   `check_patches_apply.py`, which can only check the patches applied to upstream
   files. `kernel-patches.yml` closes that gap with a real OpenWrt tree and
-  `make target/linux/prepare`, at about three minutes. Trap 9 below is what the gap
-  cost: three runs of 47 to 81 minutes each.
+  `make target/linux/prepare`, at about three minutes -- and, since the Kconfig
+  check was added, it also resolves every `source` path the prepared tree points at,
+  which is where trap 11 was found. Trap 9 above is what the gap in that gate cost:
+  three runs of 47 to 81 minutes each.
 * `scripts/pin.env` pins OpenWrt, not the feeds. They float with their branch
   heads, which is why the build prints every feed revision it installed.
 * A build is 2-2.5 hours on a GitHub runner. The gates above are cheap on purpose:
