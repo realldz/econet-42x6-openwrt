@@ -9,8 +9,12 @@ release, the branch and the live Pages URL and reports each piece.
     python3 tools/verify_publish.py [tag]
 
 Run it against a tag that has been released.  Measured on v0.1.0-m2, the release of
-run 38939207748: 19 checks, all passing (4 release assets, 59 files on gh-pages, 46
+run 38939207748: 20 checks, all passing (4 release assets, 59 files on gh-pages, 46
 kernel modules, the index served as an apk v3 database).
+
+It lists the branch through the git tree API rather than the contents API, which
+stops at 1000 entries: `--kmods all` publishes more files than that, so the check
+would have under-counted -- or failed -- on exactly the release it exists to check.
 
 One trap this tool fell into first and now documents: an apk index on main is the
 binary ADB format (it begins 'ADBd'), not a text file with 'P: name' lines, so a
@@ -151,16 +155,26 @@ def main():
               "%s module(s), %s package(s) from %s"
               % (recorded.get("kernel_modules"), recorded.get("packages_published"),
                  recorded.get("source_dir")))
-        # The branch is the published truth: list it and count the modules.
+        # The branch is the published truth: list it and count the modules.  The
+        # contents API stops at 1000 entries, and `--kmods all` publishes more than
+        # that, so the listing comes from the tree of the branch -- which is also
+        # what makes this check survive the archive it was written to check.
         try:
-            listing = json.loads(gh(
-                "api", "repos/realldz/econet-42x6-openwrt/contents/%s/%s?ref=gh-pages"
-                % (TAG, kernel.strip("/"))))
-            names = [e["name"] for e in listing]
+            tree = json.loads(gh("api", "repos/%s/git/trees/gh-pages?recursive=1"
+                                 % REPO))
+            prefix = "%s/%s/" % (TAG, kernel.strip("/"))
+            names = [e["path"][len(prefix):] for e in tree.get("tree", [])
+                     if e.get("type") == "blob" and e["path"].startswith(prefix)]
+            check("the branch listing is complete", not tree.get("truncated"),
+                  "%d file(s) under %s" % (len(names), prefix))
             apks = [n for n in names if n.startswith("kmod-") and n.endswith(".apk")]
             check("gh-pages holds the kernel modules", bool(apks),
                   "%d kmod-*.apk of %d file(s), e.g. %s"
                   % (len(apks), len(names), apks[0] if apks else "-"))
+            print("       metadata.json says %s module(s), %s package(s); the "
+                  "branch holds %d kmod-*.apk"
+                  % (recorded.get("kernel_modules"),
+                     recorded.get("packages_published"), len(apks)))
             check("gh-pages holds the kernel package",
                   any(n.startswith("kernel-") and n.endswith(".apk") for n in names),
                   next((n for n in names if n.startswith("kernel-")), "-"))
@@ -168,8 +182,14 @@ def main():
             # mac80211/cfg80211 backports are built as 6.18.54.7.2 and the mt76 ones
             # as 6.18.54.2026.09.01~be5ce791, and apk tells them apart by
             # `depends: kernel (=<version>)` rather than by file name.
-            odd = [n for n in apks if not n.startswith("kmod-") or n.split("-", 1)[1]
-                   .split("-r")[0] != "%s" % recorded.get("kernel")]
+            def version_of(name):
+                # kmod-<package>-<version>-r<release>.apk, and a package name may
+                # contain dashes -- the version and the release are the last two
+                # fields either way.
+                fields = name[len("kmod-"):-len(".apk")].split("-")
+                return fields[-2] if len(fields) >= 2 else ""
+
+            odd = [n for n in apks if version_of(n) != str(recorded.get("kernel"))]
             check("every module names the kernel or a variant of it",
                   all(str(recorded.get("kernel")) in n for n in apks),
                   "%d with a suffixed version (backports/mt76), e.g. %s"
