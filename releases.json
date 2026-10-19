@@ -3,21 +3,21 @@
     "images": [
       {
         "file": "openwrt-airoha-en7523-econet_vgp-42x6v1-squashfs-sysupgrade.bin",
-        "sha256": "cbff17d46cefb9f10d9b76ac85e94ae7879e40210b6484025c9f06c95b404115",
+        "sha256": "08190f0b452936d7a44b34a47cf1eec140a59927efae203f236656cfb0eea246",
         "size": 9437480
       }
     ],
     "index": "packages.adb",
     "kernel": "6.18.54",
-    "kernel_modules": 46,
+    "kernel_modules": 83,
     "kmods": "kmods/6.18.54/",
     "openwrt_commit": "9b95be917b2804cf877ca05c078175b37a3a95bf",
     "openwrt_describe": "main snapshot, kernel 6.18.54",
-    "packages_published": 57,
-    "published_utc": "2026-10-16T18:30:28Z",
+    "packages_published": 94,
+    "published_utc": "2026-10-19T14:32:34Z",
     "source_dir": "bin/targets/airoha/en7523/packages",
     "subtarget": "en7523",
-    "tag": "v0.1.0-m2",
+    "tag": "v0.1.1-m2",
     "target": "airoha",
     "userspace_arch": "",
     "userspace_feeds": 0
