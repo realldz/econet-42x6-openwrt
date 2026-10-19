@@ -74,6 +74,7 @@ DO_APPLY=1
 VARIANT=full
 KMODS=image
 KMODS_EXCLUDE=""
+KMODS_EXCLUDE_GIVEN=0
 PKGS_FILE=""
 JOBS=$(nproc 2>/dev/null || echo 4)
 OWRT_ARG=""
@@ -89,7 +90,8 @@ while [ $# -gt 0 ]; do
 		--packages)     PKGS_FILE="${2:?--packages needs a file}"; shift ;;
 		--kmods)        KMODS="${2:?--kmods needs image, all or a package list}"; shift ;;
 		# `${2?}` rather than `${2:?}`: an empty list is meaning, not a mistake.
-		--kmods-exclude) KMODS_EXCLUDE="${2?--kmods-exclude needs a package list}"; shift ;;
+		--kmods-exclude) KMODS_EXCLUDE="${2?--kmods-exclude needs a package list}"
+		                 KMODS_EXCLUDE_GIVEN=1; shift ;;
 		--with-pon)     WITH_PON=1 ;;
 		--mt76-debug)   MT76_DEBUG=1 ;;
 		--imagebuilder) IMAGEBUILDER=1 ;;
@@ -424,8 +426,15 @@ if [ "$KMODS" = "all" ]; then
 	# build died there after fifty minutes (run 39219693393).  Exclusions are
 	# written straight into .config, which `make defconfig` keeps, so a package
 	# named here stays off; the check below proves it rather than assuming it.
-	KMODS_EXCLUDE_DEFAULT=${KMODS_EXCLUDE_DEFAULT:-kmod-ipt-rtpengine}
-	KMODS_OFF=${KMODS_EXCLUDE-$KMODS_EXCLUDE_DEFAULT}
+	# An empty --kmods-exclude means "exclude nothing", so the default applies only
+	# when the option was not given at all: `${VAR-default}` cannot tell those apart
+	# once the header has initialised the variable, which is how the first version of
+	# this shipped with the exclusion never seeded (gate run 39230757790).
+	if [ "${KMODS_EXCLUDE_GIVEN:-0}" = "1" ]; then
+		KMODS_OFF="$KMODS_EXCLUDE"
+	else
+		KMODS_OFF="${KMODS_EXCLUDE_DEFAULT:-kmod-ipt-rtpengine}"
+	fi
 	if [ -n "$KMODS_OFF" ]; then
 		KMODS_OFF_LIST=$(printf '%s' "$KMODS_OFF" | tr ',' ' ')
 		echo "    minus $KMODS_OFF_LIST (measured not to build here)"

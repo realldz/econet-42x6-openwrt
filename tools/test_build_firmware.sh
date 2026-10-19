@@ -189,25 +189,46 @@ else
 	check_absent "and it is not held to the post-defconfig gate" \
 		"# CONFIG_PACKAGE_kmod-ipt-rtpengine is not set" "$SEEDED"
 
-	CFG=$(mktemp); SEEDED=$(mktemp)
-	KMODS="all"; KMODS_EXCLUDE="kmod-v4l2loopback,kmod-jool"
-	. "$WORK/kmods.sh" >/dev/null
-	check "--kmods-exclude is used when it is given, first name" \
-		"# CONFIG_PACKAGE_kmod-v4l2loopback is not set" "$CFG"
-	check "and the second name" "# CONFIG_PACKAGE_kmod-jool is not set" "$CFG"
-	check_absent "and it replaces the default rather than adding to it" \
+	# The default applies only when the option was *not given*.  The first version
+	# initialised KMODS_EXCLUDE="" and used ${KMODS_EXCLUDE-DEFAULT}, which cannot
+	# tell "not given" from "given empty": the variable looked set, the default never
+	# applied, and kmod-ipt-rtpengine was never turned off -- in the commit written to
+	# turn it off (gate run 39230757790, whose log has no 'minus' line).  The three
+	# states are therefore tested against the script's own initial values.
+	run_seed() { # run_seed <exclude> <given> <cfg>
+		KMODS="all" KMODS_EXCLUDE="$1" KMODS_EXCLUDE_GIVEN="$2" CFG="$3" SEEDED=$(mktemp)
+		# Sourced in this shell, not in a subshell: the block calls set_cfg() and
+		# set_cfg_off(), which come from helpers.sh above.
+		# shellcheck disable=SC1090,SC1091
+		. "$WORK/kmods.sh" >/dev/null
+	}
+	if grep -qx 'KMODS_EXCLUDE=""' scripts/build-firmware.sh \
+		&& grep -qx 'KMODS_EXCLUDE_GIVEN=0' scripts/build-firmware.sh; then
+		echo "  ok   the header starts at 'no exclusions given'"
+	else
+		echo "  FAIL the header no longer initialises the exclusion state as expected"
+		fails=$((fails + 1))
+	fi
+	CFG=$(mktemp)
+	run_seed "" 0 "$CFG"
+	check "not given: the measured default is turned off" \
 		"# CONFIG_PACKAGE_kmod-ipt-rtpengine is not set" "$CFG"
 
-	CFG=$(mktemp); SEEDED=$(mktemp)
-	KMODS="all"; KMODS_EXCLUDE=""
-	. "$WORK/kmods.sh" >/dev/null
+	CFG=$(mktemp)
+	run_seed "kmod-v4l2loopback,kmod-jool" 1 "$CFG"
+	check "given: the first name is used" "# CONFIG_PACKAGE_kmod-v4l2loopback is not set" "$CFG"
+	check "given: and the second" "# CONFIG_PACKAGE_kmod-jool is not set" "$CFG"
+	check_absent "given: it replaces the default rather than adding to it" \
+		"# CONFIG_PACKAGE_kmod-ipt-rtpengine is not set" "$CFG"
+
+	CFG=$(mktemp)
+	run_seed "" 1 "$CFG"
 	if grep -q 'is not set' "$CFG"; then
-		echo "  FAIL --kmods-exclude '' still turned something off"
+		echo "  FAIL 'given empty' still turned something off"
 		fails=$((fails + 1))
 	else
-		echo "  ok   --kmods-exclude '' excludes nothing, which is how the failure was measured"
+		echo "  ok   given empty: nothing is excluded, which is how the failure was measured"
 	fi
-	unset KMODS_EXCLUDE
 
 	CFG=$(mktemp); SEEDED=$(mktemp)
 	KMODS="image"
