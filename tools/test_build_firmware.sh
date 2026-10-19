@@ -512,10 +512,15 @@ else
 	[ "$unpinned" -eq 0 ] \
 		&& echo "  ok   every src-git line carries a 40-character commit" \
 		|| { echo "  FAIL $unpinned feed line(s) in $feeds_conf are not pinned"; fails=$((fails + 1)); }
-	n=$(grep -vc '^[[:space:]]*#' "$feeds_conf" || true)
 	[ "$(grep -c '^src-git ' "$feeds_conf")" -ge 4 ] \
 		&& echo "  ok   and the four feeds a build needs are there" \
 		|| { echo "  FAIL $feeds_conf names too few feeds"; fails=$((fails + 1)); }
+	# scripts/feeds' parse_file() does s/#.+$// before its own /\S/ check, so a
+	# line that is a bare '#' stays '#' and then dies as a syntax error.  Measured,
+	# run 39258558695: "Syntax error in feeds.conf, line 2", exit 25, in both jobs.
+	[ "$(grep -c '^#[[:space:]]*$' "$feeds_conf")" -eq 0 ] \
+		&& echo "  ok   and no line is a bare #, which scripts/feeds rejects" \
+		|| { echo "  FAIL $feeds_conf has a bare # line: scripts/feeds dies on it"; fails=$((fails + 1)); }
 fi
 # The script has to use it, or the file is decoration.
 grep -q 'FEEDS_CONF_FILE' scripts/build-firmware.sh \

@@ -398,6 +398,22 @@ catches it locally:
     it did so 69 minutes in, twice, in a package that has nothing to do with
     kernels or archives.
 
+    The fix then failed too, 4 minutes in and in both jobs, which is the cheap half
+    of the same trap: run `39258558695` printed
+
+    ```
+    ==> Feeds pinned by feeds.conf:
+          packages 3b7cdf03a6f22e91ae485e1ffdda1062da7a3431
+          ...
+    Syntax error in feeds.conf, line 2
+    ```
+
+    Line 2 was a bare `#`. `scripts/feeds`' `parse_file()` runs `s/#.+$//` before
+    its own `/\S/` check, and that pattern needs at least one character after the
+    `#`: a separator line stays `#`, counts as content, and then fails the
+    `src-git <word> <url>` match. `tools/test_build_firmware.sh` now rejects a bare
+    `#` line in that file, next to the check that every `src-git` carries a commit.
+
 ## When a build fails
 
 An OpenWrt parallel build writes each sub-build's output to `logs/` instead of the
