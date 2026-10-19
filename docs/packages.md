@@ -315,7 +315,7 @@ running an older image still needs the modules built for its kernel.
 * **The archive is published and self-consistent, but nothing has been installed
   from it on a board yet.** `v0.1.0-m2` is live, and
   `tools/verify_publish.py` checks the release assets, the `gh-pages` branch and
-  the served URLs (19 checks -- see [ci.md](ci.md)). That release published the 46
+  the served URLs (20 checks -- see [ci.md](ci.md)). That release published the 46
   modules it had selected, correctly, and no `kmod-wireguard` -- which is the gap
   `--kmods all` closes, and the reason the module list is now part of what a
   release promises rather than a side effect of the package list.

@@ -134,7 +134,7 @@ python3 tools/verify_publish.py v0.1.0-m2
 
 It reads the release and its assets, the `gh-pages` branch and the live Pages URLs a
 board would fetch, and exits non-zero on any missing piece. On `v0.1.0-m2` (run
-`38939207748`) that is 19 checks: the four release assets, the sysupgrade image at
+`38939207748`) that is 20 checks: the four release assets, the sysupgrade image at
 9,437,480 B, the Image Builder at 47,340,172 B, `releases.json` listing the tag,
 `install.md` naming the kmod directory, and 46 `kmod-*.apk` beside
 `kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk` on the branch.
@@ -144,6 +144,13 @@ an apk index on main is the binary ADB format (it begins `ADBd`), not text with
 `P: name` lines. The first version of this tool parsed it as text and reported zero
 kernel modules for a repository holding 46 of them, so the count now comes from the
 branch listing and from `metadata.json`.
+
+The branch listing has its own limit: the contents API returns at most 1000 entries
+per directory, and a full `--kmods all` archive publishes about 1150 files into one,
+so the listing comes from the git tree of the branch and a truncated answer is a
+failure rather than a smaller count. That limit was found by reading the tool against
+the 46-module release, not by a release failing on it -- the arithmetic is the only
+thing that made it visible.
 
 ## What has gone wrong here
 
