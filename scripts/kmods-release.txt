@@ -1,0 +1,34 @@
+# Kernel modules the release archive adds to the image's own 46.
+#
+#   scripts/build-firmware.sh --kmods release    reads this file
+#   .github/workflows/release.yml               defaults to it
+#   .github/workflows/kernel-patches.yml        validates it in minutes
+#
+# One package name per line.  These are built as =m: published in the archive,
+# never installed into the image, so the image keeps its own modules and its
+# mtd4 budget.
+#
+# Why not --kmods all: MEASURED, run 39231907469, the all-kmods selection builds
+# a 3,986,924 B FIT where mtd4 'kernel' is 3,801,088 B, and the v0.1.0-m2 image
+# already sat at exactly 0x3A0000.  include/kernel-defaults.mk:132 hashes every
+# =y and =m line of the kernel config into the kernel package version, and
+# include/kernel.mk:214 makes every module depend on `kernel (=6.18.54~<hash>)`,
+# so modules from a different selection cannot be installed on this image at
+# all -- the archive has to come from the image's own configuration.
+#
+# Adding a name is free only while kconfig keeps it a module.  Add one, run the
+# kernel-patches gate, then a release run: the flash gate prints the squashfs
+# offset and refuses the image once it passes 0x3A0000.
+kmod-wireguard
+kmod-tcp-bbr
+kmod-nft-fullcone
+kmod-nf-nathelper
+kmod-ifb
+kmod-sched-cake
+kmod-tun
+kmod-veth
+kmod-vxlan
+kmod-gre
+kmod-batman-adv
+kmod-jool
+kmod-ovpn-dco

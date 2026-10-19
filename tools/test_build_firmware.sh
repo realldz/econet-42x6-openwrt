@@ -18,6 +18,9 @@
 # did not hold -- which is how kmod-ipt-rtpengine reaches a telephony daemon's
 # package directory and kills a release build there (run 39219693393).
 #
+# It also covers --kmods release, the keyword that reads scripts/kmods-release.txt:
+# a missing file must be an error rather than an empty selection.
+#
 # It also covers the check that a --kmods selection took effect, which is a
 # different question from whether the flag survived: `make defconfig` keeps the
 # values the .config it reads already has, so a second run over a tree that was
@@ -465,6 +468,36 @@ echo "== and --kmods image checks nothing, because it promises nothing"
 out=$(run_effect image "" "$STALE" 100) \
 	&& echo "  ok   --kmods image passes over a stale config" \
 	|| { echo "  FAIL the default was refused: $out"; fails=$((fails + 1)); }
+
+echo "== --kmods release reads the list the release ships"
+# One file states what goes into the archive, and release.yml, build.yml and the
+# kernel-patches gate all point at it.  A keyword is worth a test because its two
+# failure modes are both silent: a missing file must not expand to an empty
+# selection (that is --kmods image, 46 modules, no kmod-wireguard), and a list
+# with comments and blank lines must not carry them into .config.
+BASH_BIN=${BASH:-bash}
+out=$(KMODS_RELEASE_FILE="$WORK/nowhere.txt" "$BASH_BIN" scripts/build-firmware.sh \
+	"$WORK/no-tree" --kmods release 2>&1) && rc=0 || rc=$?
+case "$out" in
+	*"needs $WORK/nowhere.txt"*) echo "  ok   a missing list file is refused" ;;
+	*)	echo "  FAIL a missing list file was not refused: $out"; fails=$((fails + 1)) ;;
+esac
+[ "$rc" -ne 0 ] && echo "  ok   and it exits non-zero" \
+	|| { echo "  FAIL it exited 0 on a missing list file"; fails=$((fails + 1)); }
+printf '# a comment\n\nkmod-wireguard\n   kmod-jool   \n' > "$WORK/release.txt"
+out=$(KMODS_RELEASE_FILE="$WORK/release.txt" "$BASH_BIN" scripts/build-firmware.sh \
+	"$WORK/no-tree" --kmods release -j 1 2>&1) || true
+case "$out" in
+	*"==> --kmods release: kmod-wireguard kmod-jool"*)
+		echo "  ok   comments and blank lines are dropped, names keep their order" ;;
+	*)	echo "  FAIL the list did not expand as expected: $out"; fails=$((fails + 1)) ;;
+esac
+# The real file has to name something, and that something is what the release
+# notes promise, so a test that it is not empty belongs here and not in CI.
+case "$(sed -e 's/#.*//' -e 's/[[:space:]]//g' scripts/kmods-release.txt | grep -c '^kmod-')" in
+	0)	echo "  FAIL scripts/kmods-release.txt names no kmod package"; fails=$((fails + 1)) ;;
+	*)	echo "  ok   the shipped list names packages" ;;
+esac
 
 echo
 if [ "$fails" -ne 0 ]; then

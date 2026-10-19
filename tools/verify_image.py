@@ -100,8 +100,9 @@ def check(path, limit):
     if off > limit:
         lines.append("    FAIL squashfs at 0x%X > 0x%X (mtd4 'kernel' partition)"
                      % (off, limit))
-        lines.append("         the FIT grew, most often because the kernel carries the "
-                     "initramfs;")
+        lines.append("         the FIT grew: the kernel carries the initramfs, or the")
+        lines.append("         module selection made kconfig build modules in.  Check the")
+        lines.append("         initramfs kind first, then --kmods / --kmods-exclude.")
         lines.append("         mtdsplit_fit would derive the wrong kernel size. Do not flash.")
         ok = False
     else:

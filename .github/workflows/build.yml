@@ -52,7 +52,7 @@ on:
         type: boolean
         default: false
       kmods:
-        description: "extra kernel modules to build and publish: 'all' (minus the feed packages measured not to build here), a comma-separated list of packages, or 'image' for only what the image needs"
+        description: "extra kernel modules to build and publish: 'release' (scripts/kmods-release.txt), 'all' (every module this kernel config can build -- measured NOT to fit this board's mtd4), a comma-separated list of packages, or 'image' for only what the image needs"
         required: false
         type: string
         default: image
@@ -96,7 +96,7 @@ on:
         type: boolean
         default: false
       kmods:
-        description: "extra kernel modules: 'all' (minus the measured non-builders), a comma-separated list, or 'image'"
+        description: "extra kernel modules: 'release' (the curated list), 'all' (does not fit mtd4 here), a comma-separated list, or 'image'"
         type: string
         default: image
 
@@ -340,10 +340,19 @@ jobs:
         run: |
           set -e
           echo "  kernel modules in pages/: $(find pages \( -name 'kmod-*.apk' -o -name 'kmod-*.ipk' \) | wc -l)"
-          for want in $(printf '%s' "$IN_KMODS" | tr ',' ' '); do
-            # 'all' promises the modules users ask for by name; kmod-wireguard is
-            # the one that was missing, so it is the one worth asserting on.
-            [ "$want" = "all" ] && want=kmod-wireguard
+          # What this run promised, in one place: the list file for 'release',
+          # kmod-wireguard for 'all' (the module users asked about by name and the
+          # one v0.1.0-m2 did not have), the names themselves for a list.
+          case "$IN_KMODS" in
+            release)
+              wants=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' scripts/kmods-release.txt |
+                        grep -v '^$') ;;
+            all)
+              wants=kmod-wireguard ;;
+            *)
+              wants=$(printf '%s' "$IN_KMODS" | tr ',' ' ') ;;
+          esac
+          for want in $wants; do
             n=$(find pages \( -name "$want-*.apk" -o -name "$want-*.ipk" \) | wc -l)
             echo "  $want: $n file(s) in the published directory"
             if [ "$n" -lt 1 ]; then

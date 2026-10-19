@@ -20,6 +20,15 @@
 #   --no-packages      do not seed any package list into .config
 #   --no-feeds         do not run ./scripts/feeds update/install
 #   --kmods SPEC       which kernel modules to build *beyond* the image's own
+#                        release the curated set in scripts/kmods-release.txt,
+#                               which is what release.yml ships.  It has to be a
+#                               list and not `all`: MEASURED, run 39231907469,
+#                               `all` builds a 3,986,924 B FIT where mtd4 gives
+#                               3,801,088, and the version of a kernel module
+#                               carries the md5 of the whole kernel config
+#                               (include/kernel-defaults.mk:132), so a module
+#                               built from a different selection cannot be
+#                               installed on these images anyway.
 #                        image  only what the image needs (default).  MEASURED on
 #                               v0.1.0-m2: 46 modules in the archive, and
 #                               kmod-wireguard is not among them, because nothing
@@ -28,7 +37,8 @@
 #                               broken repository rather than a module nobody
 #                               selected.
 #                        all    every module this target's kernel config can
-#                               build.  Bigger archive and a longer build.
+#                               build.  Bigger archive and a longer build, and on
+#                               this board it does not fit: see docs/packages.md.
 #                        a,b,c  exactly these packages, selected as =m: built and
 #                               published, but not installed into the image.  The
 #                               image has 0x3A0000 of mtd4 to fit in, so a module
@@ -114,25 +124,41 @@ if [ -z "$OWRT_ARG" ]; then
 	echo "usage: $0 <openwrt-tree> [options]   (see --help)" >&2
 	exit 2
 fi
-OWRT=$(cd "$OWRT_ARG" && pwd)
-
 case "$VARIANT" in
 	m2|full) ;;
 	*) echo "!! --variant must be m2 or full, not '$VARIANT'" >&2; exit 2 ;;
 esac
 
-# --kmods takes image (the default), all, or a comma-separated package list.  A
-# name is taken at face value: the post-defconfig gate below reports any name this
-# tree turns out not to have, which is more useful than a list of names this script
-# believes are allowed to exist.
+# --kmods takes image (the default), all, release, or a comma-separated package
+# list.  A name is taken at face value: the post-defconfig gate below reports any
+# name this tree turns out not to have, which is more useful than a list of names
+# this script believes are allowed to exist.
+KMODS_RELEASE_FILE=${KMODS_RELEASE_FILE:-"$HERE/kmods-release.txt"}
+if [ "$KMODS" = "release" ]; then
+	[ -f "$KMODS_RELEASE_FILE" ] || {
+		echo "!! --kmods release needs $KMODS_RELEASE_FILE, which is not there" >&2
+		exit 2
+	}
+	KMODS=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' "$KMODS_RELEASE_FILE" |
+		grep -v '^$' | paste -sd, -)
+	[ -n "$KMODS" ] || {
+		echo "!! $KMODS_RELEASE_FILE names no package" >&2
+		exit 2
+	}
+	echo "==> --kmods release: $(printf '%s' "$KMODS" | tr ',' ' ')"
+fi
 case "$KMODS" in
 	image|all) ;;
 	'') echo "!! --kmods needs image, all or a package list" >&2; exit 2 ;;
 	*[!A-Za-z0-9_,+-]*)
-		echo "!! --kmods takes image, all, or a comma-separated list of package" >&2
-		echo "   names; '$KMODS' is none of those" >&2
+		echo "!! --kmods takes image, all, release, or a comma-separated list of" >&2
+		echo "   package names; '$KMODS' is none of those" >&2
 		exit 2 ;;
 esac
+
+# Argument checks come before the tree is touched: a typo in --kmods should be
+# reported as a typo, not as "no such directory" or as a build that starts.
+OWRT=$(cd "$OWRT_ARG" && pwd)
 
 case "$KMODS_EXCLUDE" in
 	'') ;;
