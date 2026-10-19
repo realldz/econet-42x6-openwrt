@@ -37,6 +37,66 @@ ships with (`scripts/packages.append`, `scripts/packages-m2.append`); what chang
 is that a module can now also be added to a **running** board, as long as it is
 built for the kernel that board is running.
 
+## Which modules a release publishes
+
+An archive holds the modules a build *selected*, which is not the same as the
+modules that could exist -- and that gap is a trap this project walked into once.
+A release built without `--kmods` selects only what the image itself needs:
+MEASURED on v0.1.0-m2, 46 kernel modules among the 57 packages in
+`bin/targets/airoha/en7523/packages/`, and `kmod-wireguard` is not one of them,
+because nothing in the M2 package list needs it. Installing it from that archive is
+a 404 -- from a repository that was built exactly as asked, which is what makes it
+worth writing down.
+
+`scripts/build-firmware.sh` takes the selection:
+
+| flag | what it selects |
+|---|---|
+| `--kmods image` | only what the image itself carries (the default) |
+| `--kmods all` | every kernel module this kernel config can build |
+| `--kmods a,b,c` | those packages, selected as `=m` |
+
+`--kmods all` sets `CONFIG_ALL_KMODS=y`, and that is the whole mechanism: every
+non-hidden `kmod-*` package then defaults to `=m` (`config/Config-build.in:42`
+declares the symbol; `scripts/package-metadata.pl:371-383` gives each generated
+package `default m if ALL||ALL_NONSHARED||ALL_KMODS`). For a package symbol `=m`
+means "build and package it", not "build it into the kernel" -- so the module is
+compiled and published, and it is **not** added to the image. That distinction is
+the point: the persistent image has only `0x3A0000` of mtd4 to fit in, and a module
+somebody installs later belongs in the archive rather than in the flash image.
+
+Two consequences of that mechanism are worth knowing before touching it:
+
+* The module's kernel symbol does **not** have to be listed in
+  `target/linux/airoha/en7523/config-6.18` to make the module build. Selecting the
+  package is enough: `scripts/package-metadata.pl:83-85` writes the symbol into
+  `<build_dir>/target-*/linux-*/linux-*/.config.override`, and
+  `include/kernel-defaults.mk:123-124` merges that over the target config --
+  including over an explicit `# CONFIG_WIREGUARD is not set` in
+  `target/linux/generic/config-6.18:8241`. Adding the symbol to the target config
+  would be a second, redundant copy that can drift.
+* That merge happens during `make target/linux/compile`, **not** during
+  `target/linux/prepare`, so a tree that has only been through prepare has no
+  kernel `.config` at all. `tools/check_kmods.py --require-override` treats that as
+  a usage error instead of passing for lack of evidence.
+
+Adding a module to an image is a rebuild of the kernel, not an edit to the
+published archive -- a module only loads into the kernel it was built against, so
+the whole image has to be rebuilt with it selected:
+
+```sh
+./scripts/build-firmware.sh openwrt --variant m2 --kmods kmod-wireguard,kmod-udptunnel4
+```
+
+`release.yml` builds its sysupgrade job with `--kmods all` by default (the `kmods`
+input takes `all`, `image` or a list) and passes `image` to the initramfs job, which
+publishes no archive. Two checks keep a release from publishing an archive that
+404s: `kernel-patches.yml` runs `--kmods all` plus
+`tools/check_kmods.py --require-all-kmods --require-package kmod-wireguard
+--min-kmods 60` in about a minute, and `build.yml` checks after the publisher that
+`pages/` really contains the modules the run promised -- before anything is pushed
+to `gh-pages`.
+
 ## What is published, and where
 
 | | |
@@ -178,8 +238,14 @@ running an older image still needs the modules built for its kernel.
   `apk upgrade` breaks the userland.
 * The image's own kernel modules are the same packages it was built with, so
   publishing them does not change what the image contains.
-* **The kmod repository has not been exercised on a board yet**: no release has
-  been published. What is tested is the publisher itself -- its failure paths and
-  both source layouts -- and the verification gate that runs before it in CI. The
-  procedure above is what the first release has to pass, and until it does, the
-  repository is `[not verified]` on hardware.
+* **The archive is published and self-consistent, but nothing has been installed
+  from it on a board yet.** `v0.1.0-m2` is live, and
+  `tools/verify_publish.py` checks the release assets, the `gh-pages` branch and
+  the served URLs (19 checks -- see [ci.md](ci.md)). That release published the 46
+  modules it had selected, correctly, and no `kmod-wireguard` -- which is the gap
+  `--kmods all` closes, and the reason the module list is now part of what a
+  release promises rather than a side effect of the package list.
+  What remains `[not verified]` on hardware is the install itself: `apk add
+  --allow-untrusted <kmod>` against that URL, and the negative case, where a module
+  from another tag installs and then refuses to load with `Invalid module format`
+  (see above). The procedure in this document is what has to pass.

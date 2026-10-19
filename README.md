@@ -174,6 +174,15 @@ apk update --allow-untrusted
 apk add --allow-untrusted <package>
 ```
 
+Which modules that repository holds is a decision made at build time, and one the
+board cannot repair afterwards: an archive carries the modules the image was built
+with, and a plain M2 build selects 46 of them -- `kmod-wireguard` is not among
+them, because nothing in the image needs it. Releases built with `--kmods all`
+carry every kernel module this kernel can build, so a module you install months
+later is there; `--kmods a,b,c` narrows that to a list. Selected modules are
+packaged into the archive and **not** installed into the image. See
+[`docs/packages.md`](docs/packages.md).
+
 The packages are not signed, which is what `--allow-untrusted` is for. The exact
 `<tag>` and `<kernel>` for a release are written in its release notes and in
 `.../<tag>/install.md`; if GitHub Pages is not serving the branch, the same tree

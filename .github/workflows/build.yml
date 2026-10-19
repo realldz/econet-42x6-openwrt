@@ -51,6 +51,11 @@ on:
         required: false
         type: boolean
         default: false
+      kmods:
+        description: "extra kernel modules to build and publish: 'all', a comma-separated list of packages, or 'image' for only what the image needs"
+        required: false
+        type: string
+        default: image
     outputs:
       commit:
         description: 'the OpenWrt revision that was built'
@@ -90,6 +95,10 @@ on:
         description: 'also publish the userspace apk feeds'
         type: boolean
         default: false
+      kmods:
+        description: "extra kernel modules: 'all', a comma-separated list, or 'image'"
+        type: string
+        default: image
 
 permissions:
   contents: read
@@ -219,9 +228,17 @@ jobs:
           IN_IMAGES: ${{ inputs.images }}
           IN_VARIANT: ${{ inputs.variant }}
           IN_IB: ${{ inputs.imagebuilder }}
+          IN_KMODS: ${{ inputs.kmods }}
         run: |
           set -e
           args=("$OWRT_DIR" --variant "$IN_VARIANT" -j "$(nproc)")
+          # Kernel modules beyond the image's own.  The archive published for this
+          # release can only hold what this build selects, and airoha/en7523 is
+          # FEATURES:=source-only, so there is no OpenWrt feed to fall back on
+          # later.  'image' (the default) means do not widen anything.
+          if [ -n "${IN_KMODS:-}" ] && [ "$IN_KMODS" != "image" ]; then
+            args+=(--kmods "$IN_KMODS")
+          fi
           if [ "$IN_IMAGES" = "initramfs" ]; then
             args+=(--initramfs)
           else
@@ -310,6 +327,33 @@ jobs:
           fi
           ./scripts/publish-packages.sh "${args[@]}"
 
+      # The archive is what a user points apk at, so the question here is not
+      # "did the build succeed" but "does `apk add kmod-wireguard` work".  A
+      # module that was selected and did not reach pages/ is the failure worth
+      # stopping for: MEASURED on v0.1.0-m2 without --kmods, the repository was
+      # correct in every other way and 46 modules deep, and kmod-wireguard was
+      # simply not in it -- which a user sees as a 404.
+      - name: The published directory holds the modules it promises
+        if: inputs.images == 'sysupgrade' && inputs.kmods != 'image'
+        env:
+          IN_KMODS: ${{ inputs.kmods }}
+        run: |
+          set -e
+          echo "  kernel modules in pages/: $(find pages \( -name 'kmod-*.apk' -o -name 'kmod-*.ipk' \) | wc -l)"
+          for want in $(printf '%s' "$IN_KMODS" | tr ',' ' '); do
+            # 'all' promises the modules users ask for by name; kmod-wireguard is
+            # the one that was missing, so it is the one worth asserting on.
+            [ "$want" = "all" ] && want=kmod-wireguard
+            n=$(find pages \( -name "$want-*.apk" -o -name "$want-*.ipk" \) | wc -l)
+            echo "  $want: $n file(s) in the published directory"
+            if [ "$n" -lt 1 ]; then
+              echo "!! $want was selected for the archive but is not in pages/"
+              echo "   A module that is not published cannot be installed on the"
+              echo "   board, so this release would ship an archive that 404s."
+              exit 1
+            fi
+          done
+
       - name: Job summary
         if: always()
         run: |
@@ -321,6 +365,7 @@ jobs:
             echo "| OpenWrt revision | \`${{ steps.pin.outputs.commit }}\` |"
             echo "| package variant | \`${{ inputs.variant }}\` |"
             echo "| image kind | \`${{ inputs.images }}\` |"
+            echo "| kernel modules | \`${{ inputs.kmods }}\` |"
             echo "| tag | \`${{ steps.meta.outputs.tag }}\` |"
             echo
             if [ -f out/SHA256SUMS ]; then

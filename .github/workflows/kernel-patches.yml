@@ -95,6 +95,30 @@ jobs:
           set -e
           python3 tools/check_kernel_sources.py "$OWRT_DIR" --owrt
 
+      - name: An all-kmods configuration really selects the modules it promises
+        # The archive published with a release can only hold what that build
+        # selected, and this target is FEATURES:=source-only, so there is no
+        # OpenWrt kmods feed to fall back on.  MEASURED: v0.1.0-m2 published 46
+        # kernel modules and no kmod-wireguard, so `apk add --allow-untrusted
+        # kmod-wireguard` against that archive is a 404 from a repository that was
+        # built correctly.  CONFIG_ALL_KMODS=y is what fixes it: every non-hidden
+        # kmod package then defaults to =m (config/Config-build.in:42,
+        # scripts/package-metadata.pl:371-383), which builds and publishes the
+        # module without installing it into the image -- and the persistent image
+        # has only 0x3A0000 of mtd4 to fit in.  About a minute here; an hour and a
+        # half in the release build that gets it wrong.
+        run: |
+          set -e
+          BUILD_TARGET=target/linux/prepare \
+            scripts/build-firmware.sh "$OWRT_DIR" --variant m2 --no-packages --no-feeds \
+              --kmods all -j "$(nproc)"
+          python3 tools/check_kmods.py "$OWRT_DIR" \
+            --require-all-kmods \
+            --require-package kmod-wireguard \
+            --require-built kmod-wireguard \
+            --require-package kmod-udptunnel4 \
+            --min-kmods 60
+
       - name: Upload the build logs
         if: failure()
         uses: actions/upload-artifact@v4

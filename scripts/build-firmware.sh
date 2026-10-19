@@ -19,6 +19,20 @@
 #   --packages FILE    seed FILE instead of the variant's own list
 #   --no-packages      do not seed any package list into .config
 #   --no-feeds         do not run ./scripts/feeds update/install
+#   --kmods SPEC       which kernel modules to build *beyond* the image's own
+#                        image  only what the image needs (default).  MEASURED on
+#                               v0.1.0-m2: 46 modules in the archive, and
+#                               kmod-wireguard is not among them, because nothing
+#                               in the M2 list needs it.  `apk add kmod-wireguard`
+#                               against that archive 404s, which reads like a
+#                               broken repository rather than a module nobody
+#                               selected.
+#                        all    every module this target's kernel config can
+#                               build.  Bigger archive and a longer build.
+#                        a,b,c  exactly these packages, selected as =m: built and
+#                               published, but not installed into the image.  The
+#                               image has 0x3A0000 of mtd4 to fit in, so a module
+#                               the user installs later must not be in it.
 #   --with-pon         apply the stage 2 xPON patches (NOT functional yet)
 #   --mt76-debug       also apply the diagnostic mt76 patch (never ship this)
 #   --imagebuilder     additionally produce the self-contained Image Builder
@@ -54,6 +68,7 @@ MT76_DEBUG=0
 IMAGEBUILDER=0
 DO_APPLY=1
 VARIANT=full
+KMODS=image
 PKGS_FILE=""
 JOBS=$(nproc 2>/dev/null || echo 4)
 OWRT_ARG=""
@@ -67,6 +82,7 @@ while [ $# -gt 0 ]; do
 		--no-feeds)     WITH_FEEDS=0 ;;
 		--variant)      VARIANT="${2:?--variant needs m2 or full}"; shift ;;
 		--packages)     PKGS_FILE="${2:?--packages needs a file}"; shift ;;
+		--kmods)        KMODS="${2:?--kmods needs image, all or a package list}"; shift ;;
 		--with-pon)     WITH_PON=1 ;;
 		--mt76-debug)   MT76_DEBUG=1 ;;
 		--imagebuilder) IMAGEBUILDER=1 ;;
@@ -94,6 +110,19 @@ OWRT=$(cd "$OWRT_ARG" && pwd)
 case "$VARIANT" in
 	m2|full) ;;
 	*) echo "!! --variant must be m2 or full, not '$VARIANT'" >&2; exit 2 ;;
+esac
+
+# --kmods takes image (the default), all, or a comma-separated package list.  A
+# name is taken at face value: the post-defconfig gate below reports any name this
+# tree turns out not to have, which is more useful than a list of names this script
+# believes are allowed to exist.
+case "$KMODS" in
+	image|all) ;;
+	'') echo "!! --kmods needs image, all or a package list" >&2; exit 2 ;;
+	*[!A-Za-z0-9_,+-]*)
+		echo "!! --kmods takes image, all, or a comma-separated list of package" >&2
+		echo "   names; '$KMODS' is none of those" >&2
+		exit 2 ;;
 esac
 
 # ---------------------------------------------------------------------------
@@ -341,6 +370,33 @@ if [ "$WITH_PACKAGES" = "1" ]; then
 fi
 
 # ---------------------------------------------------------------------------
+# (2d) Kernel modules the image does not need
+#
+# The target is source-only, so nothing arrives from an OpenWrt feed later: what
+# is not built here cannot be installed on the board, and the archive published
+# for a release can only hold what this build produced.  The image's own package
+# list decides 46 of them (MEASURED, v0.1.0-m2) and leaves out everything else --
+# kmod-wireguard among it, which is why `apk add kmod-wireguard` against that
+# archive 404s.  --kmods widens the set.
+#
+# =m rather than =y: a package selected =y is installed into the image, and the
+# persistent image has 0x3A0000 of mtd4 to fit in.  =m builds and publishes the
+# package without installing it, which is the whole point of an archive users
+# install from later.
+# ---------------------------------------------------------------------------
+if [ "$KMODS" = "all" ]; then
+	echo "==> Seeding CONFIG_ALL_KMODS=y (every module this kernel config can build)"
+	set_cfg "CONFIG_ALL_KMODS" "y"
+elif [ "$KMODS" != "image" ]; then
+	KMOD_LIST=$(printf '%s' "$KMODS" | tr ',' ' ')
+	echo "==> Seeding extra kernel modules as =m: $KMOD_LIST"
+	# shellcheck disable=SC2086
+	for kmod in $KMOD_LIST; do
+		set_cfg "CONFIG_PACKAGE_$kmod" "m"
+	done
+fi
+
+# ---------------------------------------------------------------------------
 # The target kernel config must not ask for modules whose sources this repository
 # does not carry.  This is what killed run 38635021287: 0006 and 0007 used to be
 # steps 6 and 7 of the default series, so even the M2 build -- the one that is
@@ -422,6 +478,12 @@ EOF
    files (no AP daemon, no web UI), which is much harder to diagnose than a
    failure here.  Fix the symbol, or pass --no-packages if you really want the
    bare image.
+
+   A name passed to --kmods that this tree has no package definition for lands in
+   the MISSING list above for the same reason, and --no-packages is not the fix
+   for it.  What is not selected is not built, and a module that is not built
+   cannot be in the published archive: check the name against
+   package/kernel/linux/modules/ in the OpenWrt tree, and see docs/packages.md.
 EOF
 	# The `full` variant seeds the optical and xPON packages, and those are declared
 	# by openwrt/pon/buildroot-patches/0006-0007, which only --with-pon applies.  Say

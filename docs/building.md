@@ -263,6 +263,7 @@ Useful flags:
 | `--variant full` | seed `scripts/packages.append`: the same plus the optical frontend and the xPON/OMCI stack, which need the per-unit BOB blob -- and, because those kmod packages are declared by `0006`/`0007`, `--with-pon` as well; without it the seed dies at the post-defconfig gate. This is the default. |
 | `--packages FILE` | seed `FILE` instead of either list |
 | `--debug-kmods` | install `kmod-pciedbg` and `kmod-ringwatch` into the image |
+| `--kmods SPEC` | how many kernel modules to build and publish: `image` (default) is only what the image carries, `all` sets `CONFIG_ALL_KMODS=y` and selects every module this kernel config can build, and a comma-separated list selects those packages. Either way the modules are selected as `=m`, so they are packaged and published but **not** installed into the image. A plain M2 build selects 46 modules and no `kmod-wireguard`; see [packages.md](packages.md). |
 | `--no-packages` | seed no package list at all into `.config` |
 | `--no-feeds` | do not run `./scripts/feeds update -a` / `install -a` first |
 | `--with-pon` | also add the sixteen kernel patches from `openwrt/pon/patches-6.18/` (the `930-53`..`930-60` hooks and `950-01`..`950-08`) and `0006`/`0007` from `openwrt/pon/buildroot-patches/`, all of which need the community xPON sources as well (not in this repository); without it no `CONFIG_XPON*` or `CONFIG_OPTICAL_FRONTEND` symbol is set at all |

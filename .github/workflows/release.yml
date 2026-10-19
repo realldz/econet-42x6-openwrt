@@ -32,6 +32,10 @@ on:
         description: 'also publish the userspace feeds to gh-pages (adds hundreds of MB)'
         type: boolean
         default: false
+      kmods:
+        description: "extra kernel modules for the published archive: 'all' (every module this kernel config can build), a comma-separated list of packages, or 'image' (only what the image needs)"
+        type: string
+        default: all
       publish_release:
         description: 'create/update the GitHub Release'
         type: boolean
@@ -56,6 +60,7 @@ jobs:
       tag: ${{ steps.r.outputs.tag }}
       variant: ${{ steps.r.outputs.variant }}
       feeds: ${{ steps.r.outputs.feeds }}
+      kmods: ${{ steps.r.outputs.kmods }}
       publish_release: ${{ steps.r.outputs.publish_release }}
       publish_pages: ${{ steps.r.outputs.publish_pages }}
     steps:
@@ -67,6 +72,7 @@ jobs:
           IN_TAG: ${{ inputs.tag }}
           IN_VARIANT: ${{ inputs.variant }}
           IN_FEEDS: ${{ inputs.feeds }}
+          IN_KMODS: ${{ inputs.kmods }}
           IN_RELEASE: ${{ inputs.publish_release }}
           IN_PAGES: ${{ inputs.publish_pages }}
         run: |
@@ -77,6 +83,7 @@ jobs:
             feeds="${IN_FEEDS:-false}"
             release="${IN_RELEASE:-true}"
             pages="${IN_PAGES:-true}"
+            kmods="${IN_KMODS:-all}"
           else
             # A tag push carries no inputs; the defaults are the release shape.
             tag="$REF_NAME"
@@ -84,6 +91,9 @@ jobs:
             feeds="false"
             release="true"
             pages="true"
+            # A tag push carries no inputs; a full kmod archive is the release
+            # shape, because that is the one users cannot fix from the board.
+            kmods="all"
           fi
           [ -n "$tag" ] || { echo "!! no tag given, and this is not a tag push"; exit 1; }
           case "$tag" in
@@ -94,14 +104,26 @@ jobs:
             m2|full) ;;
             *) echo "!! unknown variant '$variant'"; exit 1 ;;
           esac
+          # 'image' keeps the archive to the modules the image itself needs; 'all'
+          # widens it to every module this kernel config can build, which is what
+          # makes `apk add kmod-wireguard` work at all -- airoha/en7523 is
+          # source-only, so OpenWrt publishes no kmods feed for this board.
+          [ -n "$kmods" ] || kmods="all"
+          case "$kmods" in
+            image|all) ;;
+            *[!A-Za-z0-9_,+-]*)
+              echo "!! --kmods takes image, all or a comma-separated package list, not '$kmods'"
+              exit 1 ;;
+          esac
           {
             echo "tag=$tag"
             echo "variant=$variant"
             echo "feeds=$feeds"
+            echo "kmods=$kmods"
             echo "publish_release=$release"
             echo "publish_pages=$pages"
           } >> "$GITHUB_OUTPUT"
-          echo "tag=$tag variant=$variant feeds=$feeds release=$release pages=$pages"
+          echo "tag=$tag variant=$variant feeds=$feeds kmods=$kmods release=$release pages=$pages"
 
   # Both jobs are the same build.yml; they differ only in which image kind they
   # produce.  They run in parallel on separate runners, so the wall-clock cost is
@@ -119,6 +141,9 @@ jobs:
       imagebuilder: false
       upload: true
       tag: ${{ needs.resolve.outputs.tag }}
+      # The kmod archive is published from the sysupgrade job only, so this build
+      # has no use for the extra modules and should not spend the time on them.
+      kmods: image
 
   sysupgrade:
     needs: resolve
@@ -129,6 +154,7 @@ jobs:
       imagebuilder: true
       upload: true
       tag: ${{ needs.resolve.outputs.tag }}
+      kmods: ${{ needs.resolve.outputs.kmods }}
       feeds: ${{ needs.resolve.outputs.feeds == 'true' }}
 
   release:
@@ -150,6 +176,7 @@ jobs:
           TAG: ${{ needs.resolve.outputs.tag }}
           VARIANT: ${{ needs.resolve.outputs.variant }}
           FEEDS: ${{ needs.resolve.outputs.feeds }}
+          KMODS: ${{ needs.resolve.outputs.kmods }}
         run: |
           set -e
           shopt -s nullglob
@@ -227,6 +254,18 @@ jobs:
             echo "published for this board, and a module has to match the running kernel"
             echo "exactly.  (Userspace packages are unaffected and come from the generic"
             echo "\`arm_cortex-a7\` feeds.)  This release publishes a repository of its own:"
+            echo
+            if [ "$KMODS" = "all" ]; then
+              echo "It carries **every kernel module this kernel can build** (\`--kmods all\`)."
+              echo "That is what v0.1.0-m2 was missing: it published 46 modules and no"
+              echo "\`kmod-wireguard\`, so \`apk add\` for a module the image itself does not"
+              echo "need came back as a 404 from a repository that was otherwise correct."
+              echo "None of those modules are installed in the image."
+            elif [ "$KMODS" = "image" ]; then
+              echo "It carries the modules the image itself needs, and nothing else."
+            else
+              echo "It carries the modules the image itself needs plus \`${KMODS}\`."
+            fi
             echo
             echo '```sh'
             echo "echo '${pages}/${TAG}/kmods/<kernel>' > /etc/apk/repositories.d/42x6-kmods.list"

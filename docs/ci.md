@@ -53,7 +53,9 @@ hand every image it produces an initramfs-embedded kernel.
 | `tools/test_build_firmware.sh` | `set_cfg`/`set_cfg_off`, the option parser, including `-jN`, the failure report itself, and `check_target_kernel_config`. |
 | `tools/check_kernel_sources.py` | A `source` line in the prepared kernel's Kconfig that points at a path the tree does not have. It resolves every `source` in the prepared kernel, skips the kernel's own `$(SRCARCH)` lines, and fails naming the file and the line: 1888 Kconfig files, about one second. `kernel-patches.yml` runs it in a step named "Every Kconfig source in the prepared kernel resolves", immediately after `target/linux/prepare`. The config-symbol check above cannot see this class -- it inspects the contents of `config-6.18`, and a dangling `source` line is not a symbol. |
 | `tools/test_check_kernel_sources.sh` | The checker above failing to fail: 11 checks, including a planted dangling source that must be named by file and line, the kernel's own `$(SRCARCH)` line that must be left alone, and an OpenWrt tree with no prepared kernel, which is a usage error rather than a pass. `lint.yml` runs it. |
-| `kernel-patches.yml` | The kernel patch series not applying, and a target kernel config that asks for modules this repository does not carry. This is the one gate that needs an OpenWrt tree and the one no check in this repository can replace: the series is applied *inside* the kernel build, against kernel sources, so `check_patches_apply.py` is blind to it by construction -- which is how nine patches that modified files the repository does not carry reached a release build. The job clones the tree, applies the overlay, and runs `BUILD_TARGET=target/linux/prepare`, which reaches the patches in about twenty seconds instead of forty minutes. Since the M2 fix it also runs the config check above, which is what would have caught the six xPON/optical symbols that made an M2 build ask for `net/xpon/`: 59 seconds on run 38931301958, against 44 minutes and an 18-second failure with no log. It then runs the Kconfig source check above on the prepared tree, in about a second, which is what the config check could not see (trap 11). It does not compile the kernel, so it cannot catch a compile error. |
+| `tools/check_kmods.py` | The module archive being narrower than the release promises. An archive can only hold what the build selected, and this target is `source-only`, so there is no OpenWrt feed to fall back on: `v0.1.0-m2` published 46 modules and no `kmod-wireguard`, which a user meets as a 404 from a repository that was built correctly (trap 12). It reads `.config`, and the kernel's `.config.override` when the kernel stage has run. `kernel-patches.yml` runs it after a `--kmods all` defconfig; `build.yml` runs it after the publisher, before anything reaches `gh-pages`. |
+| `tools/test_check_kmods.sh` | The checker above failing to fail, against fake trees: 28 checks, including the two mistakes its first draft made -- counting `# CONFIG_PACKAGE_kmod-wireguard is not set` as selected, and looking for the kernel symbol in `target/linux/airoha/en7523/config-6.18`, which does not list it and must not (trap 12). `lint.yml` runs it. |
+| `kernel-patches.yml` | The kernel patch series not applying, and a target kernel config that asks for modules this repository does not carry. This is the one gate that needs an OpenWrt tree and the one no check in this repository can replace: the series is applied *inside* the kernel build, against kernel sources, so `check_patches_apply.py` is blind to it by construction -- which is how nine patches that modified files the repository does not carry reached a release build. The job clones the tree, applies the overlay, and runs `BUILD_TARGET=target/linux/prepare`, which reaches the patches in about twenty seconds instead of forty minutes. Since the M2 fix it also runs the config check above, which is what would have caught the six xPON/optical symbols that made an M2 build ask for `net/xpon/`: 59 seconds on run 38931301958, against 44 minutes and an 18-second failure with no log. It then runs the Kconfig source check above on the prepared tree, in about a second, which is what the config check could not see (trap 11). Since the module archive became part of what a release promises, it also re-runs `make defconfig` with `--kmods all` and checks that the modules the archive is meant to hold were really selected (trap 12). It does not compile the kernel, so it cannot catch a compile error. |
 | `tools/verify_build.py` | Run after the build: the FIT load and entry addresses must match where the kernel is linked, and the image must carry no debug breadcrumbs. |
 | `tools/verify_image.py` | Run after the build on the persistent image: a squashfs superblock must exist and start inside the kernel partition. This is the gate that keeps an unsplittable image out of a release. |
 
@@ -116,6 +118,7 @@ gh workflow run release.yml --ref main `
 |---|---|
 | `tag` | the release tag, created if it does not exist. The tag is what somebody clones to rebuild the images, so it is pinned to the commit the run built. |
 | `variant` | `m2` (4x GbE, Wi-Fi 6, LuCI, apk) or `full` (adds the optical frontend and xPON/OMCI). `m2` is what leaves this machine; `full` needs the per-unit BOB calibration blob, see [hardware.md](hardware.md). |
+| `kmods` | which kernel modules the release builds and publishes: `all` (the default) selects every module this kernel config can build, `image` only what the image itself needs, and a comma-separated list selects those packages. Either form selects them as `=m`, so they are packaged into the archive and **not** installed into the image. This is what decides whether `apk add kmod-wireguard` works against the release -- see [packages.md](packages.md). |
 | `feeds` | publish the userspace feeds to `gh-pages` as well. Off by default: the modules are a few megabytes, the full userspace set hundreds. This does not affect what goes into the image -- the build always installs the feeds. |
 | `publish_release` | create or update the GitHub Release (both builds must have succeeded). |
 | `publish_pages` | push the package repository to `gh-pages`. |
@@ -240,6 +243,30 @@ catches it locally:
     `tools/check_kernel_sources.py`, run by `kernel-patches.yml` right after
     `target/linux/prepare` (see the gate table above).
 
+12. A release published a module archive that was missing the modules people ask
+    for by name. `v0.1.0-m2` went out with 46 `kmod-*.apk`, every one of them
+    correct, and no `kmod-wireguard` -- because an archive holds what the *image*
+    selected, and nothing in the M2 package list needs WireGuard. Nothing was
+    broken: `apk update` succeeded, the index was valid, and `apk add
+    --allow-untrusted kmod-wireguard` came back as a 404 from a repository that had
+    been built exactly as asked. The fix is `--kmods all`, which sets
+    `CONFIG_ALL_KMODS=y`: every non-hidden `kmod-*` package then defaults to `=m`
+    (`config/Config-build.in:42` declares it, `scripts/package-metadata.pl:371-383`
+    gives each generated package `default m if ALL||ALL_NONSHARED||ALL_KMODS`), so
+    the module is built and published without being installed into the image. Two
+    things about that mechanism are easy to get wrong, and the first draft of the
+    checker got both: a kmod package's kernel symbol does **not** have to be added
+    to `target/linux/airoha/en7523/config-6.18` (`scripts/package-metadata.pl:83-85`
+    writes it into `.config.override`, and `include/kernel-defaults.mk:123-124`
+    merges that over the target config, replacing even an explicit
+    `# CONFIG_WIREGUARD is not set` in `target/linux/generic/config-6.18`), and that
+    merge happens in `make target/linux/compile`, **not** in prepare -- so a tree
+    that has only been through prepare has no kernel `.config` at all, and
+    `tools/check_kmods.py --require-override` reports a usage error rather than
+    passing for lack of evidence. A module selected as `=m` also stays out of the
+    image, which is what keeps the 46-module image inside its `0x3A0000` of mtd4
+    while the archive grows.
+
 ## When a build fails
 
 An OpenWrt parallel build writes each sub-build's output to `logs/` instead of the
@@ -274,6 +301,7 @@ the environment turns the re-run off, which is what that test does.
   three runs of 47 to 81 minutes each.
 * `scripts/pin.env` pins OpenWrt, not the feeds. They float with their branch
   heads, which is why the build prints every feed revision it installed.
+* `--kmods all` builds modules this board has never compiled before, which is the configuration in which an exotic one fails to build. No gate can see that without compiling the kernel, so the risk is a failed release run rather than a wrong published archive: `build.yml` checks the directory it is about to publish, and `gh-pages` is only pushed at the end.
 * A build is 2-2.5 hours on a GitHub runner. The gates above are cheap on purpose:
   they run in seconds and cover the mistakes that would otherwise be found at the
   end of that build.

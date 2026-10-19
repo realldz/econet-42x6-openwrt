@@ -89,6 +89,22 @@ jobs:
           # `source "arch/$(SRCARCH)/Kconfig"` is noise that hides the real hit.
           PYTHON=python3 tools/test_check_kernel_sources.sh
 
+      - name: The kmod selection checker fails on what is absent
+        run: |
+          set -e
+          # The archive a release publishes can only hold the modules that build
+          # selected.  MEASURED: v0.1.0-m2 published 46 kernel modules and no
+          # kmod-wireguard, so `apk add --allow-untrusted kmod-wireguard` 404s
+          # from a repository that was built exactly as asked.  check_kmods.py is
+          # what turns that into a one-minute CI failure instead of a user
+          # finding out.  This exercises it against fake trees, including the two
+          # mistakes the first draft made: counting
+          # `# CONFIG_PACKAGE_kmod-wireguard is not set` as selected, and looking
+          # for the kernel symbol in the target config, where it must not be --
+          # scripts/package-metadata.pl writes it into .config.override during
+          # `make target/linux/compile` instead.
+          PYTHON=python3 tools/test_check_kmods.sh
+
       - name: ShellCheck
         run: |
           sudo apt-get update -qq

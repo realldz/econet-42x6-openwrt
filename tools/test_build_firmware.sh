@@ -104,7 +104,7 @@ echo "== the flags the documentation and CI actually pass"
 # examples showed -j8 the whole time.
 {
 	sed -n '/^INITRAMFS=1$/,/^done$/p' scripts/build-firmware.sh
-	echo 'printf "%s|%s|%s|%s|%s\n" "$JOBS" "$VARIANT" "$INITRAMFS" "$WITH_FEEDS" "$OWRT_ARG"'
+	echo 'printf "%s|%s|%s|%s|%s|%s\n" "$JOBS" "$VARIANT" "$INITRAMFS" "$WITH_FEEDS" "$OWRT_ARG" "$KMODS"'
 } > "$WORK/parser.sh"
 if [ ! -s "$WORK/parser.sh" ]; then
 	echo "FAIL could not extract the option parser"; fails=$((fails + 1))
@@ -120,18 +120,54 @@ else
 			fails=$((fails + 1))
 		fi
 	}
-	expect_parse "-j4"            "4|full|1|1|"    -j4
-	expect_parse "-j 4"           "4|full|1|1|"    -j 4
-	expect_parse "--jobs 4"       "4|full|1|1|"    --jobs 4
-	expect_parse "--jobs=4"       "4|full|1|1|"    --jobs=4
-	expect_parse "--no-feeds"     "$NCPU|full|1|0|" --no-feeds
+	expect_parse "-j4"            "4|full|1|1||image"    -j4
+	expect_parse "-j 4"           "4|full|1|1||image"    -j 4
+	expect_parse "--jobs 4"       "4|full|1|1||image"    --jobs 4
+	expect_parse "--jobs=4"       "4|full|1|1||image"    --jobs=4
+	expect_parse "--no-feeds"     "$NCPU|full|1|0||image" --no-feeds
 	expect_parse "tree + -j8 + --variant m2 + --no-initramfs" \
-		"8|m2|0|1|/tree" /tree -j8 --variant m2 --no-initramfs
+		"8|m2|0|1|/tree|image" /tree -j8 --variant m2 --no-initramfs
+	expect_parse "--kmods all" "$NCPU|full|1|1||all" --kmods all
+	expect_parse "--kmods a,b" "$NCPU|full|1|1||kmod-wireguard,kmod-udptunnel4" \
+		--kmods kmod-wireguard,kmod-udptunnel4
 	if bash "$WORK/parser.sh" -jbogus >/dev/null 2>&1; then
 		echo "  FAIL -jbogus was accepted as a job count"
 		fails=$((fails + 1))
 	else
 		echo "  ok   -jbogus is refused"
+	fi
+fi
+
+echo "== --kmods seeds the modules, and as =m rather than =y"
+# =y installs the module into the image, and the persistent image has 0x3A0000 of
+# mtd4 to fit in -- so a module meant for the published archive must be =m.  The
+# seeding block is extracted rather than copied, so this cannot drift into testing
+# a stale duplicate of it.
+sed -n '/^if .*KMODS.*all.*then$/,/^fi$/p' scripts/build-firmware.sh > "$WORK/kmods.sh"
+if [ ! -s "$WORK/kmods.sh" ]; then
+	echo "  FAIL could not extract the --kmods seeding block"; fails=$((fails + 1))
+else
+	CFG=$(mktemp); SEEDED=$(mktemp)
+	KMODS="kmod-wireguard,kmod-udptunnel4"
+	# shellcheck disable=SC1090,SC1091
+	. "$WORK/kmods.sh" >/dev/null
+	check "the named module is seeded as =m" "CONFIG_PACKAGE_kmod-wireguard=m" "$CFG"
+	check "and so is the second one" "CONFIG_PACKAGE_kmod-udptunnel4=m" "$CFG"
+	check_absent "nothing is seeded =y" "CONFIG_PACKAGE_kmod-wireguard=y" "$CFG"
+	check "and both reach the post-defconfig gate" "CONFIG_PACKAGE_kmod-wireguard=m" "$SEEDED"
+
+	CFG=$(mktemp); SEEDED=$(mktemp)
+	KMODS="all"
+	. "$WORK/kmods.sh" >/dev/null
+	check "--kmods all seeds CONFIG_ALL_KMODS" "CONFIG_ALL_KMODS=y" "$CFG"
+
+	CFG=$(mktemp); SEEDED=$(mktemp)
+	KMODS="image"
+	. "$WORK/kmods.sh" >/dev/null
+	if [ -s "$CFG" ]; then
+		echo "  FAIL --kmods image seeded something"; fails=$((fails + 1))
+	else
+		echo "  ok   --kmods image seeds nothing extra"
 	fi
 fi
 
