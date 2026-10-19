@@ -127,8 +127,11 @@ default list holds exactly one name, `kmod-ipt-rtpengine`, because that is the o
 that has been *measured* to fail here. The list is not a judgement about which
 modules a router needs, and not a guess about which feeds are risky: excluding a
 module the board could have used is a real loss, so a name is added to it only
-after a run failed on it. `--kmods-exclude ""` selects everything `ALL_KMODS`
-reaches, which is how that failure was measured -- do not ship it.
+after a run failed on it. The default applies when the option is absent:
+`--kmods-exclude ""` selects everything `ALL_KMODS` reaches, which is how that
+failure was measured -- do not ship it, and note that those two states are
+different variables in the script because the first version of this confused them
+(trap 15 in [ci.md](ci.md)).
 
 The check after `defconfig` refuses a selection that kept an excluded package on,
 because the exclusion is written into a file the tree rewrites: if a future

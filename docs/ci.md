@@ -325,6 +325,21 @@ catches it locally:
     type. `tools/test_build_firmware.sh` checks that invocation against a fake
     `make`, because the code only runs after something else has already failed.
 
+15. The exclusion above was written and never applied. Its first version read
+    `${KMODS_EXCLUDE-$DEFAULT}` against a header that had already initialised the
+    variable to the empty string, and `${VAR-default}` asks "is VAR set?", not "is
+    it empty?" -- so the default branch was unreachable and `kmod-ipt-rtpengine`
+    was never turned off, in the commit written to turn it off. Gate run
+    `39230757790` is the evidence: its log goes from `CONFIG_ALL_KMODS=y` to `all
+    8 symbol(s) present`, with no `minus` line, and it exits **green** -- nothing
+    in the gate knew what the exclusion was supposed to do. The tests did not
+    catch it either: they set `KMODS_EXCLUDE` themselves before sourcing the
+    block, which reproduces a state the script is never in. "Not given" and
+    "given empty" are now two variables (`KMODS_EXCLUDE_GIVEN`), and the test
+    checks all three states against the script's own initial values. The general
+    rule this list keeps earning: a test that supplies the input the code under
+    test is supposed to derive is testing the test.
+
 ## When a build fails
 
 An OpenWrt parallel build writes each sub-build's output to `logs/` instead of the
@@ -365,7 +380,9 @@ the environment turns the re-run off, which is what that test does.
 * `--kmods all` builds modules this board has never compiled before, which is the
   configuration in which an exotic one fails to build -- trap 13 is that happening,
   in a feed package directory, and `--kmods-exclude` is the answer to it: a stop
-  list of measured failures, not a promise that there are none. No gate can see a
+  list of measured failures, not a promise that there are none. The list applies
+  unless the option is given at all -- an empty value turns it off, and telling
+  those two states apart is one variable of its own (trap 15). No gate can see a
   compile error without compiling the kernel, so the risk is a failed release run
   rather than a wrong published archive: `build.yml` checks the directory it is
   about to publish, and `gh-pages` is only pushed at the end.
