@@ -368,7 +368,11 @@ catches it locally:
     `kernel (=6.18.54~<that md5>-r1)`. A module from a different selection is
     refused by `apk` instead of being loaded and crashing, which is the right
     failure -- and it means the published archive is the image's own configuration
-    or it is nothing. So the release ships `--kmods release`, a list in
+    or it is nothing. Two shipped releases make it concrete: `v0.1.0-m2` names
+    `kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk` and `v0.1.1-m2` names
+    `kernel-6.18.54~143bce488b8f95c4cfd2004defd35cd5-r1.apk`, because 46 modules
+    became 83 -- while both sysupgrade images are 9,437,480 B. A module from one tag
+    does not install on the other; flash the image from the same tag first. So the release ships `--kmods release`, a list in
     `scripts/kmods-release.txt`: what fits, tested by the gate that seeds that exact
     file with the feeds present, and by the flash gate on the next release run.
 

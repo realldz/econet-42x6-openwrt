@@ -83,9 +83,9 @@ openwrt-airoha-en7523-econet_vgp-42x6v1-squashfs-sysupgrade.bin: 9699624 bytes
 ```
 
 The rootfs started 256 KiB further in because the kernel grew: the FIT totalsize is
-3,986,924 B against a mtd4 of 3,801,088 B (`0x3A0000`). The published v0.1.0-m2
-image is 3,769,092 B of FIT, whose rootfs is padded to exactly `0x3A0000` -- 31 KB
-of headroom, and no more. So the all-kmods selection does not fit this board. The
+3,986,924 B against a mtd4 of 3,801,088 B (`0x3A0000`). The v0.1.0-m2 image was
+3,769,092 B of FIT, whose rootfs is padded to exactly `0x3A0000` -- 31 KB of
+headroom, and no more. So the all-kmods selection does not fit this board. The
 gate that says so is `--warn-only` inside the Build step, because a build machine
 cannot know what a board's partition table looks like, and hard in the Verify step,
 which is where that run stopped: nothing was published.
@@ -101,9 +101,11 @@ grep '=[ym]' $(LINUX_DIR)/.config.set | LC_ALL=C sort | $(MKHASH) md5 > $(LINUX_
 and `include/kernel.mk:214` gives every module
 `EXTRA_DEPENDS:=kernel (=$(LINUX_VERSION)~$(LINUX_VERMAGIC)-r$(LINUX_RELEASE))`. The
 version of a module therefore carries the md5 of the *whole* kernel config -- on
-v0.1.0-m2, `kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk`. Widening the
+v0.1.0-m2, `kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk`, and on
+v0.1.1-m2, `kernel-6.18.54~143bce488b8f95c4cfd2004defd35cd5-r1.apk`. Widening the
 selection changes the kernel version every module names, and `apk` would refuse the
-install. Building the archive from a second tree, the way OpenWrt's own builders
+install. The two releases make that concrete: the same board, the same sysupgrade
+image size to the byte, and two kernels whose modules do not mix. Building the archive from a second tree, the way OpenWrt's own builders
 separate images from feeds, does not help here: their images and their kmods come
 from one configuration, and that configuration is what does not fit.
 
@@ -131,10 +133,18 @@ Each is built as `=m` and published with the packages it depends on; none of the
 is installed into the image. Adding a name is free only while kconfig can keep it a
 module: a symbol declared `bool` forces the code into the kernel instead, which is
 where most of the all-kmods growth came from. The loop is: edit the file, run the
-`kernel-patches.yml` gate (minutes, and it seeds the real list with the feeds
-present), then a release run, whose flash gate prints the squashfs offset and
+`kernel-patches.yml` gate (minutes, and it seeds the real list into a *feedless*
+tree, because that is what a release builds), then a release run, whose flash gate
+prints the squashfs offset and
 refuses the image once it passes `0x3A0000`. [Trap 16 in ci.md](ci.md) is the short
 version of why this is a list.
+
+MEASURED on the release that shipped it, run `39259723152` (`v0.1.1-m2`, 1h11m08s):
+**83 kernel modules** among 94 packages, 96 files in
+`.../v0.1.1-m2/kmods/6.18.54/`, all 14 names present, no `kmod-ipt-rtpengine`, and
+the FIT totalsize **3,792,548 B** -- 8,540 B under the mtd4 limit, so the rootfs
+still starts at `0x3A0000` and the sysupgrade image is the same 9,437,480 B it was
+before. The list costs about 23 KB of kernel, not 256.
 
 ### `--kmods all` does nothing on a tree that is already configured
 

@@ -25,12 +25,26 @@ it was supposed to publish:
 
 | | |
 |---|---|
-| release | [`v0.1.0-m2`](https://github.com/realldz/econet-42x6-openwrt/releases/tag/v0.1.0-m2), built by [run 38939207748](https://github.com/realldz/econet-42x6-openwrt/actions/runs/38939207748) in 1h07m45s |
+| release | [`v0.1.1-m2`](https://github.com/realldz/econet-42x6-openwrt/releases/tag/v0.1.1-m2), built by [run 39259723152](https://github.com/realldz/econet-42x6-openwrt/actions/runs/39259723152) in 1h11m08s |
 | variant | `m2` -- 4x GbE, Wi-Fi 6 (MT7916), LuCI over HTTPS, apk. No optical frontend, no xPON/OMCI |
-| sysupgrade | `openwrt-airoha-en7523-econet_vgp-42x6v1-squashfs-sysupgrade.bin`, 9,437,480 B |
-| initramfs | `openwrt-airoha-en7523-econet_vgp-42x6v1-initramfs-kernel.bin` |
-| Image Builder | `openwrt-imagebuilder-airoha-en7523.Linux-x86_64.tar.zst`, 47,340,172 B |
-| kmod repository | `https://realldz.github.io/econet-42x6-openwrt/v0.1.0-m2/kmods/6.18.54` -- 59 files, **46 kernel modules**, `kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk` among them |
+| sysupgrade | `openwrt-airoha-en7523-econet_vgp-42x6v1-squashfs-sysupgrade.bin`, 9,437,480 B; FIT 3,792,548 B inside a 3,801,088 B mtd4 `kernel` partition (8,540 B spare), squashfs at `0x3A0000` |
+| initramfs | `openwrt-airoha-en7523-econet_vgp-42x6v1-initramfs-kernel.bin`, 8,815,628 B |
+| Image Builder | `openwrt-imagebuilder-airoha-en7523.Linux-x86_64.tar.zst`, 47,848,220 B |
+| kmod repository | `https://realldz.github.io/econet-42x6-openwrt/v0.1.1-m2/kmods/6.18.54` -- 96 files, **83 kernel modules** (the 14 names in `scripts/kmods-release.txt` and their dependencies), `kernel-6.18.54~143bce488b8f95c4cfd2004defd35cd5-r1.apk` among them |
+
+The first release, `v0.1.0-m2` ([run 38939207748](https://github.com/realldz/econet-42x6-openwrt/actions/runs/38939207748),
+1h07m45s), published 59 files and 46 modules -- only the ones the image itself
+carries, because that is what a plain M2 build selects. `v0.1.1-m2` publishes the
+curated list instead, so a module you install later is there, and that is why it
+holds 83.
+
+**The two tags' modules are not interchangeable.** The kernel package name carries
+the md5 of the whole kernel config (`include/kernel-defaults.mk`), and selecting 83
+modules instead of 46 changed it: `v0.1.0-m2` shipped
+`kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk`, `v0.1.1-m2` ships
+`kernel-6.18.54~143bce488b8f95c4cfd2004defd35cd5-r1.apk`. A module from one tag
+will not install on the other, even though the sysupgrade image is the same size to
+the byte: flash the image from the same tag first, then add modules from it.
 
 Three kernel version strings appear in that one repository, and that is normal:
 `kmod-pppoe-6.18.54-r1.apk`, `kmod-mac80211-6.18.54.7.2-r4.apk` (the mac80211/cfg80211
@@ -44,7 +58,7 @@ would declare those modules (and would ask the kernel for `net/xpon/`) are behin
 `--with-pon`. Installing from it, on the board:
 
 ```sh
-echo 'https://realldz.github.io/econet-42x6-openwrt/v0.1.0-m2/kmods/6.18.54' \
+echo 'https://realldz.github.io/econet-42x6-openwrt/v0.1.1-m2/kmods/6.18.54' \
   > /etc/apk/repositories.d/42x6-kmods.list
 apk update --allow-untrusted
 apk add --allow-untrusted <package>

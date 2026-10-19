@@ -183,7 +183,8 @@ Releases publish the curated list in
 [`scripts/kmods-release.txt`](scripts/kmods-release.txt) (`--kmods release`): 14
 names -- WireGuard, BBR, CAKE and IFB for SQM, TUN/TAP, veth, macvlan, VXLAN, GRE,
 6in4, the NAT helpers, `nft-arp` -- plus the packages they depend on, so a module
-you install months later is there.
+you install months later is there. MEASURED on `v0.1.1-m2`: 83 modules, 96 files in
+one directory, 8,540 B of kernel partition left over.
 
 `--kmods all` was the first shape and it does not fit this board: MEASURED, the
 FIT reaches 3,986,924 B against a 3,801,088 B mtd4 `kernel` partition, and the
