@@ -52,7 +52,7 @@ on:
         type: boolean
         default: false
       kmods:
-        description: "extra kernel modules to build and publish: 'all', a comma-separated list of packages, or 'image' for only what the image needs"
+        description: "extra kernel modules to build and publish: 'all' (minus the feed packages measured not to build here), a comma-separated list of packages, or 'image' for only what the image needs"
         required: false
         type: string
         default: image
@@ -96,7 +96,7 @@ on:
         type: boolean
         default: false
       kmods:
-        description: "extra kernel modules: 'all', a comma-separated list, or 'image'"
+        description: "extra kernel modules: 'all' (minus the measured non-builders), a comma-separated list, or 'image'"
         type: string
         default: image
 

@@ -179,7 +179,11 @@ board cannot repair afterwards: an archive carries the modules the image was bui
 with, and a plain M2 build selects 46 of them -- `kmod-wireguard` is not among
 them, because nothing in the image needs it. Releases built with `--kmods all`
 carry every kernel module this kernel can build, so a module you install months
-later is there; `--kmods a,b,c` narrows that to a list. Selected modules are
+later is there; `--kmods a,b,c` narrows that to a list, and
+`--kmods-exclude a,b` keeps a package out of it. The one name excluded by default
+is `kmod-ipt-rtpengine`: its feed directory also builds telephony daemons this
+board has no use for, and one of them failed a release build
+([trap 13](docs/ci.md)). Selected modules are
 packaged into the archive and **not** installed into the image. See
 [`docs/packages.md`](docs/packages.md).
 

@@ -33,7 +33,7 @@ on:
         type: boolean
         default: false
       kmods:
-        description: "extra kernel modules for the published archive: 'all' (every module this kernel config can build), a comma-separated list of packages, or 'image' (only what the image needs)"
+        description: "extra kernel modules for the published archive: 'all' (every module this kernel config can build, minus the feed packages measured not to build here), a comma-separated list of packages, or 'image' (only what the image needs)"
         type: string
         default: all
       publish_release:
@@ -256,8 +256,11 @@ jobs:
             echo "\`arm_cortex-a7\` feeds.)  This release publishes a repository of its own:"
             echo
             if [ "$KMODS" = "all" ]; then
-              echo "It carries **every kernel module this kernel can build** (\`--kmods all\`)."
-              echo "That is what v0.1.0-m2 was missing: it published 46 modules and no"
+              echo "It carries **every kernel module this kernel can build** (\`--kmods all\`),"
+              echo "minus \`kmod-ipt-rtpengine\`: its feed directory also builds telephony"
+              echo "daemons this board has no use for, and one of them failed a release"
+              echo "build (\`--kmods-exclude\`, docs/packages.md). That is what v0.1.0-m2"
+              echo "was missing: it published 46 modules and no"
               echo "\`kmod-wireguard\`, so \`apk add\` for a module the image itself does not"
               echo "need came back as a 404 from a repository that was otherwise correct."
               echo "None of those modules are installed in the image."

@@ -13,6 +13,11 @@
 # used to leave a stale `=y` behind, and the sysupgrade image built that way was
 # 12,058,913 B with the squashfs at 0x760000 instead of 9,437,473 B at 0x3A0000.
 #
+# It also covers the two ways that check can be fooled: a selection that never
+# took effect because defconfig kept an older .config, and an exclusion that
+# did not hold -- which is how kmod-ipt-rtpengine reaches a telephony daemon's
+# package directory and kills a release build there (run 39219693393).
+#
 # It also covers the check that a --kmods selection took effect, which is a
 # different question from whether the flag survived: `make defconfig` keeps the
 # values the .config it reads already has, so a second run over a tree that was
@@ -173,6 +178,36 @@ else
 	KMODS="all"
 	. "$WORK/kmods.sh" >/dev/null
 	check "--kmods all seeds CONFIG_ALL_KMODS" "CONFIG_ALL_KMODS=y" "$CFG"
+	# Run 39219693393: CONFIG_ALL_KMODS reaches kernel modules that live inside
+	# feed package directories, and one of those directories builds more than its
+	# module -- package/feeds/telephony/rtpengine also builds telephony daemons this
+	# board has no use for, and the build died there.  The default exclusion stays
+	# out of $SEEDED on purpose: --no-feeds means the package does not exist, and
+	# that is an exclusion that holds rather than a symbol that failed to survive.
+	check "the module that dragged that directory in is turned off" \
+		"# CONFIG_PACKAGE_kmod-ipt-rtpengine is not set" "$CFG"
+	check_absent "and it is not held to the post-defconfig gate" \
+		"# CONFIG_PACKAGE_kmod-ipt-rtpengine is not set" "$SEEDED"
+
+	CFG=$(mktemp); SEEDED=$(mktemp)
+	KMODS="all"; KMODS_EXCLUDE="kmod-v4l2loopback,kmod-jool"
+	. "$WORK/kmods.sh" >/dev/null
+	check "--kmods-exclude is used when it is given, first name" \
+		"# CONFIG_PACKAGE_kmod-v4l2loopback is not set" "$CFG"
+	check "and the second name" "# CONFIG_PACKAGE_kmod-jool is not set" "$CFG"
+	check_absent "and it replaces the default rather than adding to it" \
+		"# CONFIG_PACKAGE_kmod-ipt-rtpengine is not set" "$CFG"
+
+	CFG=$(mktemp); SEEDED=$(mktemp)
+	KMODS="all"; KMODS_EXCLUDE=""
+	. "$WORK/kmods.sh" >/dev/null
+	if grep -q 'is not set' "$CFG"; then
+		echo "  FAIL --kmods-exclude '' still turned something off"
+		fails=$((fails + 1))
+	else
+		echo "  ok   --kmods-exclude '' excludes nothing, which is how the failure was measured"
+	fi
+	unset KMODS_EXCLUDE
 
 	CFG=$(mktemp); SEEDED=$(mktemp)
 	KMODS="image"
@@ -255,6 +290,32 @@ case "$out" in
 	*)	echo "  ok   a directory that is not there is not re-run" ;;
 esac
 
+echo "== and it re-runs through the top-level Makefile, not inside the directory"
+# A feed package path is a symlink into feeds/, and a feed Makefile run on its own
+# has no $(INCLUDE_DIR): run 39219693393's re-run died on a fake
+# "Makefile:37: /nls.mk: No such file or directory" and printed that as the reason
+# the release failed, hiding the real one.  The invocation is checked here because
+# nothing else in a build can catch it -- it only happens after something failed.
+mkdir -p "$WORK/bin"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "$MAKE_ARGS"\nexit 1\n' > "$WORK/bin/make"
+chmod +x "$WORK/bin/make"
+rm -f "$WORK/make-args.txt"
+out=$(PATH="$WORK/bin:$PATH" MAKE_ARGS="$WORK/make-args.txt" \
+	report_build_failure "$WORK/make-output.txt" "$FAKE" 2>&1)
+recorded=$(head -1 "$WORK/make-args.txt" 2>/dev/null)
+case "$recorded" in
+	*"target/linux/compile V=s"*)
+		echo "  ok   the failing directory is compiled through the top level" ;;
+	*)	echo "  FAIL the re-run did not use the top-level Makefile: '$recorded'"
+		fails=$((fails + 1)) ;;
+esac
+case "$recorded" in
+	*" -C "*)
+		echo "  FAIL the re-run still uses make -C, which cannot work for a feed path"
+		fails=$((fails + 1)) ;;
+	*)	echo "  ok   and it does not chdir into a directory whose Makefile needs the top level" ;;
+esac
+
 echo "== the target kernel config, when it asks for modules this repo does not carry"
 # Run 38635021287 died eighteen seconds into `target/linux/compile` because
 # config-6.18 asked for net/xpon/ and drivers/net/optical/, which only exist in the
@@ -304,8 +365,8 @@ echo "== --kmods all, and whether the selection actually happened"
 # -- one job, two invocations of the script -- and produced 45 modules =y, 0 =m,
 # with CONFIG_ALL_KMODS=y in .config and the post-defconfig gate green.  The
 # archive from that tree would have held the image's own modules and nothing else.
-run_effect() { # run_effect <kmods> <kmod-list> <cfg> <min>
-	KMODS="$1" KMOD_LIST="$2" CFG="$3" KMODS_ALL_MIN="$4" \
+run_effect() { # run_effect <kmods> <kmod-list> <cfg> <min> [excluded]
+	KMODS="$1" KMOD_LIST="$2" CFG="$3" KMODS_ALL_MIN="$4" KMODS_OFF="${5-}" \
 		bash -c '. "$1"' _ "$WORK/kmods-effect.sh" 2>&1
 }
 STALE="$WORK/stale.config"
@@ -339,6 +400,22 @@ case "$out" in
 		echo "  ok   the =y and =m counts are reported separately" ;;
 	*)	echo "  FAIL the split is not reported: $out"; fails=$((fails + 1)) ;;
 esac
+
+# An exclusion that did not hold puts the module back, and with it the feed
+# package directory: the archive stops being what the release promised and the
+# build stops being predictable.  It is refused, and the module is named.
+printf 'CONFIG_ALL_KMODS=y\nCONFIG_PACKAGE_kmod-fake0=y\nCONFIG_PACKAGE_kmod-ipt-rtpengine=m\n' \
+	> "$WORK/excluded-but-kept.config"
+out=$(run_effect all "" "$WORK/excluded-but-kept.config" 1 kmod-ipt-rtpengine); rc=$?
+case "$out" in
+	*"are selected anyway"*"kmod-ipt-rtpengine"*)
+		echo "  ok   an exclusion that did not hold is refused, and the module named" ;;
+	*)	echo "  FAIL an exclusion that did not hold was accepted: $out"; fails=$((fails + 1)) ;;
+esac
+[ "$rc" -ne 0 ] && echo "  ok   and it reports failure" || { echo "  FAIL it did not fail"; fails=$((fails + 1)); }
+out=$(run_effect all "" "$REAL" 2 kmod-ipt-rtpengine) \
+	&& echo "  ok   the same exclusion against a config without that package passes" \
+	|| { echo "  FAIL an exclusion that held was refused: $out"; fails=$((fails + 1)); }
 
 echo "== --kmods with a list, and a package that did not get selected"
 # A name the tree knows but that is not selected is the same reuse case, and the

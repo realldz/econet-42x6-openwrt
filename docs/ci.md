@@ -50,7 +50,7 @@ hand every image it produces an initramfs-embedded kernel.
 | `tools/check_patches_apply.py` | The series not applying to a clean tree at the pinned revision -- well-formed and applicable are different properties. It fetches every file the series touches from `raw.githubusercontent.com` at `OPENWRT_COMMIT`, applies the patches in the order `apply-overlay.sh` uses, and stops at the first refusal. About ten seconds, against hours for a build. If the network is unavailable it prints `SKIPPED` and exits 0: that is not a patch problem, but it is never silent. |
 | `tools/test_check_patches_apply.sh` | The gate above failing to fail. It plants a patch whose context does not exist and one shaped like the patch that broke this pipeline, and asserts both are refused by name. |
 | `tools/test_publish_packages.sh` | The package publisher's failure paths and both source layouts. 42 checks, no OpenWrt tree. It covers the case a real tree found and no fixture had: one kernel published under several version strings (`6.18.54`, `6.18.54.7.2`, `6.18.54.2026.09.01~be5ce791`), which an earlier publisher refused as "more than one kernel". |
-| `tools/test_build_firmware.sh` | `set_cfg`/`set_cfg_off`, the option parser, including `-jN`, the failure report itself, and `check_target_kernel_config`. |
+| `tools/test_build_firmware.sh` | `set_cfg`/`set_cfg_off`, the option parser, including `-jN`, the `--kmods` seeds and the `--kmods-exclude` that turns one off, the post-defconfig effect checks, the failure report itself -- including the top-level form of its re-run, checked against a fake `make`, because nothing before a failure exercises it -- and `check_target_kernel_config`. |
 | `tools/check_kernel_sources.py` | A `source` line in the prepared kernel's Kconfig that points at a path the tree does not have. It resolves every `source` in the prepared kernel, skips the kernel's own `$(SRCARCH)` lines, and fails naming the file and the line: 1888 Kconfig files, about one second. `kernel-patches.yml` runs it in a step named "Every Kconfig source in the prepared kernel resolves", immediately after `target/linux/prepare`. The config-symbol check above cannot see this class -- it inspects the contents of `config-6.18`, and a dangling `source` line is not a symbol. |
 | `tools/test_check_kernel_sources.sh` | The checker above failing to fail: 11 checks, including a planted dangling source that must be named by file and line, the kernel's own `$(SRCARCH)` line that must be left alone, and an OpenWrt tree with no prepared kernel, which is a usage error rather than a pass. `lint.yml` runs it. |
 | `tools/check_kmods.py` | The module archive being narrower than the release promises. An archive can only hold what the build selected, and this target is `source-only`, so there is no OpenWrt feed to fall back on: `v0.1.0-m2` published 46 modules and no `kmod-wireguard`, which a user meets as a 404 from a repository that was built correctly (trap 12). It reads `.config`, and the kernel's `.config.override` when the kernel stage has run. `kernel-patches.yml` runs it after a `--kmods all` defconfig on a *fresh* configuration, which is what a release build starts from: MEASURED, run `39219228917`, 45 kmod packages `=y` and 1110 `=m`, against `--min-kmods 1000`. `build.yml` runs it after the publisher, before anything reaches `gh-pages`. |
@@ -278,6 +278,53 @@ catches it locally:
     that did not happen, and the gate above removes `.config` first, the way a
     fresh clone starts.
 
+13. `--kmods all` reached a kernel module that lives inside a feed *package*
+    directory, and the directory built more than the module.
+    `CONFIG_ALL_KMODS=y` defaults every non-hidden `kmod-*` package to `=m`
+    wherever it is declared, and `feeds/telephony/net/rtpengine` declares
+    `kmod-ipt-rtpengine` alongside telephony daemons this board has no use for.
+    Selecting the module put the whole directory into `make world`, and run
+    `39219693393` died there, fifty minutes into the sysupgrade build:
+
+    ```
+    make[3] -C feeds/telephony/net/rtpengine compile
+        ERROR: package/feeds/telephony/rtpengine failed to build (build variant: no-transcode).
+    ```
+
+    The image and the selection were fine -- the effect check had printed `46
+    kernel module(s) =y (in the image), 1149 =m (built and published)` -- and the
+    archive that run would have published was complete. What failed is a feed
+    package the release never needed. `--kmods-exclude` now names such packages,
+    writing them as `# CONFIG_PACKAGE_<name> is not set` before `defconfig`:
+    kconfig keeps a value the `.config` already carries, which is trap 12's
+    mechanism used in the other direction, and the post-defconfig check refuses a
+    selection that kept an excluded package on. The default list holds the one
+    measured case, `kmod-ipt-rtpengine` -- a name earns its place by failing a run,
+    because excluding a module somebody could have used is a real loss. The
+    alternative, restricting `--kmods all` to modules declared in the tree rather
+    than in the feeds, was rejected for that reason: it would also drop the ones
+    that build (`kmod-v4l2loopback`, `kmod-jool` and `kmod-ovpn-dco` all completed
+    in that same run).
+
+14. The failure report printed a reason that was not the reason. `logs/` does not
+    exist in a release build (trap 9), so `report_build_failure` re-runs the
+    failing directory by hand -- but a feed package path is a symlink into
+    `feeds/`, and `make -C package/feeds/telephony/rtpengine` runs that feed's
+    Makefile with no `$(INCLUDE_DIR)`, so the re-run died on
+
+    ```
+    Makefile:37: /nls.mk: No such file or directory
+    ```
+
+    and printed it under "re-running ... with V=s" as though it were the error that
+    stopped the release. It is not: `/nls.mk` is what `$(TOPDIR)/rules.mk` expands
+    to when `INCLUDE_DIR` is empty, and rtpengine's real compile error was never
+    produced -- so trap 13's failure is still unexplained, and what makes it not
+    matter is the exclusion rather than a diagnosis. The re-run goes through the
+    top-level Makefile now (`make <dir>/compile V=s`), which is what a person would
+    type. `tools/test_build_firmware.sh` checks that invocation against a fake
+    `make`, because the code only runs after something else has already failed.
+
 ## When a build fails
 
 An OpenWrt parallel build writes each sub-build's output to `logs/` instead of the
@@ -295,9 +342,12 @@ for 47 to 81 minutes of work each. Three things now make the reason reach the lo
 of that line, and prints the last 80 lines of the matching file in `logs/`; because
 OpenWrt writes `logs/` only when `CONFIG_BUILD_LOG=y` -- a prompt that is
 `bool "..." if DEVEL`, so a release image cannot set it -- it also re-runs that one
-directory with `make -C <dir> compile V=s` under `timeout 900` and prints the last
-80 lines of that; and the build job uploads `logs/` and `.config` as an artifact
-when it fails. The function that does the printing is `report_build_failure`, and
+directory through the top-level Makefile, `make <dir>/compile V=s`, under
+`timeout 900`, and prints the last 80 lines of that. The form matters: `make -C
+<dir>` looks equivalent and is not, because a feed package path is a symlink into
+`feeds/` and a feed Makefile run on its own has no `$(INCLUDE_DIR)` -- which is how
+a re-run came to print a fake `/nls.mk` error as the reason a release failed (trap
+14). The build job uploads `logs/` and `.config` as an artifact when it fails. The function that does the printing is `report_build_failure`, and
 `tools/test_build_firmware.sh` checks it against a fake tree; `BUILD_LOG_RERUN=0` in
 the environment turns the re-run off, which is what that test does.
 
@@ -312,7 +362,13 @@ the environment turns the re-run off, which is what that test does.
   three runs of 47 to 81 minutes each.
 * `scripts/pin.env` pins OpenWrt, not the feeds. They float with their branch
   heads, which is why the build prints every feed revision it installed.
-* `--kmods all` builds modules this board has never compiled before, which is the configuration in which an exotic one fails to build. No gate can see that without compiling the kernel, so the risk is a failed release run rather than a wrong published archive: `build.yml` checks the directory it is about to publish, and `gh-pages` is only pushed at the end.
+* `--kmods all` builds modules this board has never compiled before, which is the
+  configuration in which an exotic one fails to build -- trap 13 is that happening,
+  in a feed package directory, and `--kmods-exclude` is the answer to it: a stop
+  list of measured failures, not a promise that there are none. No gate can see a
+  compile error without compiling the kernel, so the risk is a failed release run
+  rather than a wrong published archive: `build.yml` checks the directory it is
+  about to publish, and `gh-pages` is only pushed at the end.
 * A build is 2-2.5 hours on a GitHub runner. The gates above are cheap on purpose:
   they run in seconds and cover the mistakes that would otherwise be found at the
   end of that build.

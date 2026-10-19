@@ -53,8 +53,9 @@ worth writing down.
 | flag | what it selects |
 |---|---|
 | `--kmods image` | only what the image itself carries (the default) |
-| `--kmods all` | every kernel module this kernel config can build |
+| `--kmods all` | every kernel module this kernel config can build, minus `--kmods-exclude` |
 | `--kmods a,b,c` | those packages, selected as `=m` |
+| `--kmods-exclude a,b` | with `--kmods all`: keep these off (default: `kmod-ipt-rtpengine`) |
 
 `--kmods all` sets `CONFIG_ALL_KMODS=y`, and that is the whole mechanism: every
 non-hidden `kmod-*` package then defaults to `=m` (`config/Config-build.in:42`
@@ -67,9 +68,12 @@ somebody installs later belongs in the archive rather than in the flash image.
 
 MEASURED on a fresh configuration, run `39219228917`: `CONFIG_ALL_KMODS=y` leaves
 45 kmod packages `=y` -- the target's own, which is what the image carries -- and
-1110 `=m`, every one of them built and published. That is the shape of the archive
-a release is meant to serve: the image unchanged, the archive wider by an order of
-magnitude.
+1110 `=m`, every one of them built and published. Under `--variant m2`, whose
+package list carries one module the bare target does not, the release run
+`39219693393` printed `46 kernel module(s) =y (in the image), 1149 =m (built and
+published)`, and that build then failed in a feed package the archive never needed
+-- see "Feed kernel modules" below. That is the shape of the archive a release is
+meant to serve: the image unchanged, the archive wider by an order of magnitude.
 
 ### `--kmods all` does nothing on a tree that is already configured
 
@@ -93,6 +97,43 @@ names the fix:
 ```
 rm -f <tree>/.config
 ```
+
+### Feed kernel modules, and the one that does not build here
+
+`CONFIG_ALL_KMODS=y` does not distinguish where a module is declared, so it also
+selects the kernel modules that live inside the *feeds* -- and a feed package
+directory is not a module. `feeds/telephony/net/rtpengine` declares
+`kmod-ipt-rtpengine` next to telephony daemons this board has no use for, and
+selecting the module puts the whole directory into `make world`. Run `39219693393`
+died there, fifty minutes into the sysupgrade build:
+
+```
+make[3] -C feeds/telephony/net/rtpengine compile
+    ERROR: package/feeds/telephony/rtpengine failed to build (build variant: no-transcode).
+```
+
+The selection itself was right -- the effect check had printed `46 kernel
+module(s) =y (in the image), 1149 =m (built and published)` -- and the reason the
+directory failed is still unknown (the report re-ran it the wrong way, trap 14 in
+[ci.md](ci.md)). None of that matters for the release: the package is a telephony
+daemon, the module is not one a board user asks for, and it was only ever in the
+build because a module happened to share its directory.
+
+`--kmods-exclude` names such packages, and `--kmods all` writes them as
+`# CONFIG_PACKAGE_<name> is not set` before `make defconfig`. That works for the
+same reason the reuse trap above is a trap: kconfig keeps a value the `.config`
+already carries, so an exclusion that is written down stays written down. The
+default list holds exactly one name, `kmod-ipt-rtpengine`, because that is the one
+that has been *measured* to fail here. The list is not a judgement about which
+modules a router needs, and not a guess about which feeds are risky: excluding a
+module the board could have used is a real loss, so a name is added to it only
+after a run failed on it. `--kmods-exclude ""` selects everything `ALL_KMODS`
+reaches, which is how that failure was measured -- do not ship it.
+
+The check after `defconfig` refuses a selection that kept an excluded package on,
+because the exclusion is written into a file the tree rewrites: if a future
+`defconfig` does not keep it, the module comes back, the directory comes back, and
+the release fails in a telephony daemon rather than saying why.
 
 Two consequences of that mechanism are worth knowing before touching it:
 
@@ -119,7 +160,8 @@ the whole image has to be rebuilt with it selected:
 
 `release.yml` builds its sysupgrade job with `--kmods all` by default (the `kmods`
 input takes `all`, `image` or a list) and passes `image` to the initramfs job, which
-publishes no archive. Two checks keep a release from publishing an archive that
+publishes no archive; the exclusions above apply to both, since the list is the
+script's default rather than something a workflow passes. Two checks keep a release from publishing an archive that
 404s: `kernel-patches.yml` runs `--kmods all` plus
 `tools/check_kmods.py --require-all-kmods --require-package kmod-wireguard
 --min-kmods 1000` in about two minutes, and `build.yml` checks after the publisher that

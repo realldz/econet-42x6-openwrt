@@ -33,6 +33,10 @@
 #                               published, but not installed into the image.  The
 #                               image has 0x3A0000 of mtd4 to fit in, so a module
 #                               the user installs later must not be in it.
+#   --kmods-exclude L  with --kmods all: keep these comma-separated kernel module
+#                      packages off.  Default kmod-ipt-rtpengine, MEASURED not to
+#                      build on this target (run 39219693393); an empty value
+#                      excludes nothing, which is how that was measured.
 #   --with-pon         apply the stage 2 xPON patches (NOT functional yet)
 #   --mt76-debug       also apply the diagnostic mt76 patch (never ship this)
 #   --imagebuilder     additionally produce the self-contained Image Builder
@@ -69,6 +73,7 @@ IMAGEBUILDER=0
 DO_APPLY=1
 VARIANT=full
 KMODS=image
+KMODS_EXCLUDE=""
 PKGS_FILE=""
 JOBS=$(nproc 2>/dev/null || echo 4)
 OWRT_ARG=""
@@ -83,6 +88,8 @@ while [ $# -gt 0 ]; do
 		--variant)      VARIANT="${2:?--variant needs m2 or full}"; shift ;;
 		--packages)     PKGS_FILE="${2:?--packages needs a file}"; shift ;;
 		--kmods)        KMODS="${2:?--kmods needs image, all or a package list}"; shift ;;
+		# `${2?}` rather than `${2:?}`: an empty list is meaning, not a mistake.
+		--kmods-exclude) KMODS_EXCLUDE="${2?--kmods-exclude needs a package list}"; shift ;;
 		--with-pon)     WITH_PON=1 ;;
 		--mt76-debug)   MT76_DEBUG=1 ;;
 		--imagebuilder) IMAGEBUILDER=1 ;;
@@ -122,6 +129,14 @@ case "$KMODS" in
 	*[!A-Za-z0-9_,+-]*)
 		echo "!! --kmods takes image, all, or a comma-separated list of package" >&2
 		echo "   names; '$KMODS' is none of those" >&2
+		exit 2 ;;
+esac
+
+case "$KMODS_EXCLUDE" in
+	'') ;;
+	*[!A-Za-z0-9_,+-]*)
+		echo "!! --kmods-exclude takes a comma-separated list of package names;" >&2
+		echo "   '$KMODS_EXCLUDE' is not one" >&2
 		exit 2 ;;
 esac
 
@@ -212,14 +227,21 @@ set_cfg() {
 # input but `make defconfig` rewrites it to `# CONFIG_FOO is not set`, so that is
 # what has to be written here and what the check further down has to look for --
 # seeding `=n` would make the symbol look like it never survived.
-set_cfg_off() {
-	local key="$1"
+set_cfg_off() { # set_cfg_off <key> [record]
+	local key="$1" record="${2:-1}"
 	if grep -q "^${key}=" "$CFG"; then
 		sed -i "s|^${key}=.*|# ${key} is not set|" "$CFG"
 	elif ! grep -q "^# ${key} is not set" "$CFG"; then
 		printf '# %s is not set\n' "$key" >> "$CFG"
 	fi
-	printf '# %s is not set\n' "$key" >> "$SEEDED"
+	# Recording is what makes the gate after defconfig report a symbol that did
+	# not survive.  That is right for a symbol the build needs and wrong for one
+	# it is excluding: a package this tree does not have at all (--no-feeds) is
+	# an exclusion that holds, not a script error.  So exclusions pass 0, and
+	# the effect check further down is what proves they held.
+	if [ "$record" = "1" ]; then
+		printf '# %s is not set\n' "$key" >> "$SEEDED"
+	fi
 	echo "    # ${key} is not set"
 }
 
@@ -270,7 +292,13 @@ report_build_failure() { # report_build_failure <captured-make-output> <owrt-tre
 		echo
 		echo "--- re-running '$failed' with V=s, because there is no logs/ to read"
 		echo "    (CONFIG_BUILD_LOG only has a prompt when CONFIG_DEVEL is set)"
-		( cd "$owrt" && $runner make -C "$failed" compile V=s 2>&1 | tail -n 80 ) || true
+		# Through the top-level Makefile -- `make <dir>/compile`, never
+		# `make -C <dir>`.  A feed package path is a symlink into feeds/, and a
+		# feed Makefile run on its own has no $(INCLUDE_DIR): the re-run died on
+		# "Makefile:37: /nls.mk: No such file or directory" and printed that as
+		# if it were the reason the release failed, hiding the real one (run
+		# 39219693393, package/feeds/telephony/rtpengine).
+		( cd "$owrt" && $runner make "$failed/compile" V=s 2>&1 | tail -n 80 ) || true
 	fi
 }
 
@@ -388,6 +416,24 @@ fi
 if [ "$KMODS" = "all" ]; then
 	echo "==> Seeding CONFIG_ALL_KMODS=y (every module this kernel config can build)"
 	set_cfg "CONFIG_ALL_KMODS" "y"
+	# CONFIG_ALL_KMODS reaches kernel modules that live in the feeds too, and a
+	# feed package directory is not just a module: selecting a module in it can
+	# drag the whole directory into the build.  package/feeds/telephony/rtpengine
+	# is the measured case -- kmod-ipt-rtpengine selected the directory, the
+	# directory also builds telephony daemons this board has no use for, and the
+	# build died there after fifty minutes (run 39219693393).  Exclusions are
+	# written straight into .config, which `make defconfig` keeps, so a package
+	# named here stays off; the check below proves it rather than assuming it.
+	KMODS_EXCLUDE_DEFAULT=${KMODS_EXCLUDE_DEFAULT:-kmod-ipt-rtpengine}
+	KMODS_OFF=${KMODS_EXCLUDE-$KMODS_EXCLUDE_DEFAULT}
+	if [ -n "$KMODS_OFF" ]; then
+		KMODS_OFF_LIST=$(printf '%s' "$KMODS_OFF" | tr ',' ' ')
+		echo "    minus $KMODS_OFF_LIST (measured not to build here)"
+		# shellcheck disable=SC2086
+		for kmod in $KMODS_OFF_LIST; do
+			set_cfg_off "CONFIG_PACKAGE_$kmod" 0
+		done
+	fi
 elif [ "$KMODS" != "image" ]; then
 	KMOD_LIST=$(printf '%s' "$KMODS" | tr ',' ' ')
 	echo "==> Seeding extra kernel modules as =m: $KMOD_LIST"
@@ -538,6 +584,28 @@ if [ "$KMODS" = "all" ]; then
    and see docs/packages.md, "Which modules a release publishes".
 EOF
 		exit 1
+	fi
+	if [ -n "${KMODS_OFF:-}" ]; then
+		KMODS_OFF_STILL=""
+		# shellcheck disable=SC2086
+		for kmod in $(printf '%s' "$KMODS_OFF" | tr ',' ' '); do
+			grep -qE "^CONFIG_PACKAGE_$kmod=[my]$" "$CFG" && KMODS_OFF_STILL="$KMODS_OFF_STILL $kmod"
+		done
+		if [ -n "$KMODS_OFF_STILL" ]; then
+			cat >&2 <<EOF
+
+!! --kmods-exclude named kernel module package(s) that are selected anyway:
+      $KMODS_OFF_STILL
+
+   CONFIG_ALL_KMODS=y reaches a module in a feed package directory, and that
+   directory can build more than the module: package/feeds/telephony/rtpengine
+   took fifty minutes of a release build to fail (run 39219693393) for a module
+   this board does not need.  An exclusion is the fix, and this is the check that
+   says whether the exclusion held.  Passing --kmods-exclude "" turns exclusion
+   off, which is how that failure was measured -- do not ship that.
+EOF
+			exit 1
+		fi
 	fi
 elif [ "$KMODS" != "image" ]; then
 	KMODS_BAD=""
