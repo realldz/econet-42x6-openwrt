@@ -372,6 +372,32 @@ catches it locally:
     `scripts/kmods-release.txt`: what fits, tested by the gate that seeds that exact
     file with the feeds present, and by the flash gate on the next release run.
 
+17. A release died because a *feed* moved under it. Run `39248180026` (`v0.1.1-m2`,
+    `kmods=release`) failed both firmware jobs 69 minutes in, in `python3`:
+
+    ```
+    ./Modules/_ctypes/_ctypes.c:119:10: fatal error: ffi.h: No such file or directory
+    ERROR: package/feeds/packages/python3 failed to build.
+    ```
+
+    `openwrt/packages` HEAD at that moment was `70ac3a84406c`, "libffi: move to core
+    repo", committed `2026-10-19T10:45Z` -- six minutes before the run was
+    dispatched. The core this repository pins (`9b95be917b28`, 2026-10-02) predates
+    the move, so the assembled tree had `libffi` in neither half while the feed's
+    `python3` still depends on `libffi` and `libffi/host`. Nothing in this
+    repository had changed since the previous day's build, which had got past that
+    point. `scripts/pin.env` pinned OpenWrt and said, in as many words, that the
+    feeds "follow their own branch heads" -- so the fix is
+    [`scripts/feeds.conf`](../scripts/feeds.conf): the five feeds pinned by commit,
+    copied into the tree before `./scripts/feeds update -a`, and printed. The pins
+    are the feed state six minutes before the move.
+
+    The lesson is not "pin your feeds", which was already known and written down;
+    it is that a documented risk is not a mitigated one. The comment describing
+    the exposure survived three release runs, and the run that finally collected on
+    it did so 69 minutes in, twice, in a package that has nothing to do with
+    kernels or archives.
+
 ## When a build fails
 
 An OpenWrt parallel build writes each sub-build's output to `logs/` instead of the
@@ -407,8 +433,11 @@ the environment turns the re-run off, which is what that test does.
   check was added, it also resolves every `source` path the prepared tree points at,
   which is where trap 11 was found. Trap 9 above is what the gap in that gate cost:
   three runs of 47 to 81 minutes each.
-* `scripts/pin.env` pins OpenWrt, not the feeds. They float with their branch
-  heads, which is why the build prints every feed revision it installed.
+* `scripts/pin.env` pins OpenWrt and `scripts/feeds.conf` pins the feeds, both
+  by commit, and the build prints every feed revision it installed. Before the
+  feeds were pinned they floated with their branch heads, and that is trap 17:
+  a feed that moved `libffi` into the core repository broke both firmware jobs
+  of a release run with no change of ours in between.
 * A release does **not** ship `--kmods all`: that selection builds a kernel this
   board cannot hold (trap 16). It ships the list in `scripts/kmods-release.txt`,
   and the list is the whole budget -- each name is compiled into the archive only

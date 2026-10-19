@@ -273,7 +273,7 @@ Useful flags:
 | `--no-apply` | skip step 2, if the overlay is already in the tree |
 | `-j N` | build parallelism; `-jN` and `--jobs=N` work too, as with `make` |
 
-### Feeds are fetched for you, and they float
+### Feeds are fetched and pinned
 
 A fresh clone of OpenWrt has no `feeds/` directory at all, and everything this
 board wants beyond the bare system -- LuCI, the AP daemon, `iperf3`, `i2c-tools`
@@ -285,14 +285,21 @@ not exist, so LuCI could not be enabled at all `[hardware]`.
 
 The script therefore runs `./scripts/feeds update -a` and `./scripts/feeds
 install -a` when `feeds/luci` is missing, and prints the revision each feed
-resolved to. **Those revisions are not pinned by `scripts/pin.env`** -- the feeds
-follow their own branch heads, so a rebuild months later gets newer feed packages
-against the same kernel and the same patches. When the luci feed was last checked
-it sat 3 days ahead of the pinned tree (`0257cc05`, 2026-10-05, against
-`9b95be9`, 2026-10-02), which was judged acceptable; a rebuild that behaves
-differently from the one described here should start by comparing those lines.
-Pass `--no-feeds` only when you have installed feeds yourself and mean to keep
-them.
+resolved to. Before running them it copies [`scripts/feeds.conf`](../scripts/feeds.conf)
+into the tree, so the four (five, with `video`) feeds are checked out at the
+commits that file names, and prints the pins.
+
+They used to float with their branch heads, and that cost a release: run
+`39248180026` died in both firmware jobs after 69 minutes because
+`openwrt/packages` HEAD had moved `libffi` into the core repository six minutes
+before the run was dispatched, while the pinned core (`9b95be9`, 2026-10-02)
+still expected it in the feed -- so `python3` built without `ffi.h` and stopped
+the build ([trap 17](ci.md)). Nothing in this repository had changed. A pin is
+the fix: `scripts/feeds.conf` holds `packages 3b7cdf0`, `luci 0a601b6`,
+`routing 4b9891b`, `telephony 5d68d53` and `video 6917907`, which is the feed
+state six minutes before that move. Override the file with `FEEDS_CONF_FILE=`
+when you need a different set. Pass `--no-feeds` only when you have installed
+feeds yourself and mean to keep them.
 
 The script verifies after `make defconfig` that every symbol it seeded is still in
 `.config`, and refuses to build if one was dropped -- `defconfig` discards a symbol

@@ -18,7 +18,9 @@
 #                             own factory partition -- see docs/pon-port.md.
 #   --packages FILE    seed FILE instead of the variant's own list
 #   --no-packages      do not seed any package list into .config
-#   --no-feeds         do not run ./scripts/feeds update/install
+#   --no-feeds         do not run ./scripts/feeds update/install.  Without it the
+#                      feeds are installed from feeds.conf, which pins them;
+#                      see the note in section (2).
 #   --kmods SPEC       which kernel modules to build *beyond* the image's own
 #                        release the curated set in scripts/kmods-release.txt,
 #                               which is what release.yml ships.  It has to be a
@@ -195,14 +197,26 @@ fi
 # `grep -E '^CONFIG_FEED_' .config` was empty, and feeds/luci did not exist, so
 # LuCI could not be enabled at all.
 #
-# The feeds follow their own branch heads rather than the revision pinned in
-# pin.env, so a rebuild months later picks up newer feed packages.  The revisions
-# actually used are printed below and belong in any bug report.
+# The feeds are pinned too, in feeds.conf next to this script, because they used
+# to follow their own branch heads and that is how a green release turns red with
+# no commit of ours in between: run 39248180026, 2026-10-19, died in both firmware
+# jobs because openwrt/packages HEAD had moved libffi into the core repo six
+# minutes earlier, and the pinned core predates the move.  The revisions actually
+# used are printed below and belong in any bug report.
 # ---------------------------------------------------------------------------
+FEEDS_CONF_FILE=${FEEDS_CONF_FILE:-"$HERE/feeds.conf"}
 if [ "$WITH_FEEDS" = "1" ]; then
 	if [ -d "$OWRT/feeds/luci" ] && [ -d "$OWRT/package/feeds/luci" ]; then
 		echo "==> Feeds already installed, leaving them alone"
 	else
+		if [ -f "$FEEDS_CONF_FILE" ]; then
+			cp "$FEEDS_CONF_FILE" "$OWRT/feeds.conf"
+			echo "==> Feeds pinned by $(basename "$FEEDS_CONF_FILE"):"
+			sed -n 's|^src-git \([a-z]*\) .*\^\([0-9a-f]\{7,\}\).*|      \1 \2|p' \
+				"$OWRT/feeds.conf"
+		else
+			echo "==> No feeds pin file, so the tree's own feeds.conf.default is used"
+		fi
 		echo "==> ./scripts/feeds update -a && ./scripts/feeds install -a"
 		( cd "$OWRT" && ./scripts/feeds update -a && ./scripts/feeds install -a )
 	fi

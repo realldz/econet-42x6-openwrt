@@ -499,6 +499,29 @@ case "$(sed -e 's/#.*//' -e 's/[[:space:]]//g' scripts/kmods-release.txt | grep 
 	*)	echo "  ok   the shipped list names packages" ;;
 esac
 
+echo "== every feed is pinned to a commit, because a floating one cost a release"
+# run 39248180026: openwrt/packages HEAD moved libffi into the core repo six
+# minutes before the run, the pinned core predates the move, and both firmware
+# jobs died in python3.  An unpinned line here is that bug, back again.
+feeds_conf=scripts/feeds.conf
+if [ ! -s "$feeds_conf" ]; then
+	echo "  FAIL $feeds_conf is missing"; fails=$((fails + 1))
+else
+	unpinned=$(grep -v '^[[:space:]]*#' "$feeds_conf" | grep -v '^[[:space:]]*$' |
+		grep -cv '^src-git [a-z]* [^ ]*\^[0-9a-f]\{40\}$')
+	[ "$unpinned" -eq 0 ] \
+		&& echo "  ok   every src-git line carries a 40-character commit" \
+		|| { echo "  FAIL $unpinned feed line(s) in $feeds_conf are not pinned"; fails=$((fails + 1)); }
+	n=$(grep -vc '^[[:space:]]*#' "$feeds_conf" || true)
+	[ "$(grep -c '^src-git ' "$feeds_conf")" -ge 4 ] \
+		&& echo "  ok   and the four feeds a build needs are there" \
+		|| { echo "  FAIL $feeds_conf names too few feeds"; fails=$((fails + 1)); }
+fi
+# The script has to use it, or the file is decoration.
+grep -q 'FEEDS_CONF_FILE' scripts/build-firmware.sh \
+	&& echo "  ok   build-firmware.sh reads it" \
+	|| { echo "  FAIL build-firmware.sh does not read $feeds_conf"; fails=$((fails + 1)); }
+
 echo
 if [ "$fails" -ne 0 ]; then
 	echo "$fails check(s) FAILED"
