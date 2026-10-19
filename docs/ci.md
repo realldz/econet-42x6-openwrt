@@ -53,7 +53,7 @@ hand every image it produces an initramfs-embedded kernel.
 | `tools/test_build_firmware.sh` | `set_cfg`/`set_cfg_off`, the option parser, including `-jN`, the failure report itself, and `check_target_kernel_config`. |
 | `tools/check_kernel_sources.py` | A `source` line in the prepared kernel's Kconfig that points at a path the tree does not have. It resolves every `source` in the prepared kernel, skips the kernel's own `$(SRCARCH)` lines, and fails naming the file and the line: 1888 Kconfig files, about one second. `kernel-patches.yml` runs it in a step named "Every Kconfig source in the prepared kernel resolves", immediately after `target/linux/prepare`. The config-symbol check above cannot see this class -- it inspects the contents of `config-6.18`, and a dangling `source` line is not a symbol. |
 | `tools/test_check_kernel_sources.sh` | The checker above failing to fail: 11 checks, including a planted dangling source that must be named by file and line, the kernel's own `$(SRCARCH)` line that must be left alone, and an OpenWrt tree with no prepared kernel, which is a usage error rather than a pass. `lint.yml` runs it. |
-| `tools/check_kmods.py` | The module archive being narrower than the release promises. An archive can only hold what the build selected, and this target is `source-only`, so there is no OpenWrt feed to fall back on: `v0.1.0-m2` published 46 modules and no `kmod-wireguard`, which a user meets as a 404 from a repository that was built correctly (trap 12). It reads `.config`, and the kernel's `.config.override` when the kernel stage has run. `kernel-patches.yml` runs it after a `--kmods all` defconfig; `build.yml` runs it after the publisher, before anything reaches `gh-pages`. |
+| `tools/check_kmods.py` | The module archive being narrower than the release promises. An archive can only hold what the build selected, and this target is `source-only`, so there is no OpenWrt feed to fall back on: `v0.1.0-m2` published 46 modules and no `kmod-wireguard`, which a user meets as a 404 from a repository that was built correctly (trap 12). It reads `.config`, and the kernel's `.config.override` when the kernel stage has run. `kernel-patches.yml` runs it after a `--kmods all` defconfig on a *fresh* configuration, which is what a release build starts from: MEASURED, run `39219228917`, 45 kmod packages `=y` and 1110 `=m`, against `--min-kmods 1000`. `build.yml` runs it after the publisher, before anything reaches `gh-pages`. |
 | `tools/test_check_kmods.sh` | The checker above failing to fail, against fake trees: 28 checks, including the two mistakes its first draft made -- counting `# CONFIG_PACKAGE_kmod-wireguard is not set` as selected, and looking for the kernel symbol in `target/linux/airoha/en7523/config-6.18`, which does not list it and must not (trap 12). `lint.yml` runs it. |
 | `kernel-patches.yml` | The kernel patch series not applying, and a target kernel config that asks for modules this repository does not carry. This is the one gate that needs an OpenWrt tree and the one no check in this repository can replace: the series is applied *inside* the kernel build, against kernel sources, so `check_patches_apply.py` is blind to it by construction -- which is how nine patches that modified files the repository does not carry reached a release build. The job clones the tree, applies the overlay, and runs `BUILD_TARGET=target/linux/prepare`, which reaches the patches in about twenty seconds instead of forty minutes. Since the M2 fix it also runs the config check above, which is what would have caught the six xPON/optical symbols that made an M2 build ask for `net/xpon/`: 59 seconds on run 38931301958, against 44 minutes and an 18-second failure with no log. It then runs the Kconfig source check above on the prepared tree, in about a second, which is what the config check could not see (trap 11). Since the module archive became part of what a release promises, it also re-runs `make defconfig` with `--kmods all` and checks that the modules the archive is meant to hold were really selected (trap 12). It does not compile the kernel, so it cannot catch a compile error. |
 | `tools/verify_build.py` | Run after the build: the FIT load and entry addresses must match where the kernel is linked, and the image must carry no debug breadcrumbs. |
@@ -265,7 +265,18 @@ catches it locally:
     `tools/check_kmods.py --require-override` reports a usage error rather than
     passing for lack of evidence. A module selected as `=m` also stays out of the
     image, which is what keeps the 46-module image inside its `0x3A0000` of mtd4
-    while the archive grows.
+    while the archive grows to the 1110 modules a fresh `--kmods all`
+    configuration selects (run `39219228917`).
+
+    The same mechanism has a second half, and it cost a run of its own. `make
+    defconfig` keeps the values the `.config` it reads already carries, so
+    seeding `CONFIG_ALL_KMODS=y` into a tree an earlier build had configured is
+    both present and ineffective: MEASURED, run `39218437654`, which ran
+    `build-firmware.sh` twice in one job -- 45 kmod packages `=y`, **0 `=m`**,
+    `kmod-wireguard` not set, the flag in `.config` and the seed gate green.
+    `build-firmware.sh` now counts the selection after defconfig and refuses one
+    that did not happen, and the gate above removes `.config` first, the way a
+    fresh clone starts.
 
 ## When a build fails
 

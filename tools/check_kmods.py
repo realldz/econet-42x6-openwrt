@@ -46,7 +46,7 @@ itself needs a real build.
 Usage:
     tools/check_kmods.py <OpenWrt tree> --require-package kmod-wireguard
     tools/check_kmods.py <OpenWrt tree> --require-package kmod-wireguard \\
-        --require-all-kmods --min-kmods 100
+        --require-all-kmods --min-kmods 1000
     tools/check_kmods.py <OpenWrt tree> --require-override CONFIG_WIREGUARD
 Exit status: 0 every requirement held, 1 one did not, 2 usage error.
 """
@@ -152,6 +152,8 @@ def main() -> int:
             print("     That is what --kmods all seeds.  A kmod package selects as"
                   " =m by default (see the docstring), so the archive would hold")
             print("     the 46-odd modules the image needs and nothing else.")
+            print("     MEASURED with --kmods all on a fresh configuration: 45 =y,")
+            print("     1110 =m (run 39219228917).")
 
     for name in args.require_package:
         val = cfg.get(f"CONFIG_PACKAGE_{name}")

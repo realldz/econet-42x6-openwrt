@@ -114,8 +114,13 @@ jobs:
         # kmod package then defaults to =m (config/Config-build.in:42,
         # scripts/package-metadata.pl:371-383), which builds and publishes the
         # module without installing it into the image -- and the persistent image
-        # has only 0x3A0000 of mtd4 to fit in.  About a minute here; an hour and a
+        # has only 0x3A0000 of mtd4 to fit in.  About two minutes here; an hour and
         # half in the release build that gets it wrong.
+        #
+        # MEASURED on a fresh defconfig (run 39219228917): 45 kmod packages =y --
+        # the target's own, which is what the image carries -- and 1110 =m.  The
+        # --min-kmods floor is a tripwire for a selection that silently shrank,
+        # not a target: the failure it has to catch left 0.
         run: |
           set -e
           # Start from a fresh configuration, as a release build does.  `make
@@ -135,7 +140,7 @@ jobs:
             --require-package kmod-wireguard \
             --require-built kmod-wireguard \
             --require-package kmod-udptunnel4 \
-            --min-kmods 60
+            --min-kmods 1000
 
       - name: Upload the build logs
         if: failure()

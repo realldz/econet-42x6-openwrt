@@ -65,6 +65,35 @@ compiled and published, and it is **not** added to the image. That distinction i
 the point: the persistent image has only `0x3A0000` of mtd4 to fit in, and a module
 somebody installs later belongs in the archive rather than in the flash image.
 
+MEASURED on a fresh configuration, run `39219228917`: `CONFIG_ALL_KMODS=y` leaves
+45 kmod packages `=y` -- the target's own, which is what the image carries -- and
+1110 `=m`, every one of them built and published. That is the shape of the archive
+a release is meant to serve: the image unchanged, the archive wider by an order of
+magnitude.
+
+### `--kmods all` does nothing on a tree that is already configured
+
+`make defconfig` keeps the values the `.config` it reads already carries, and
+applies a default only to symbols it has not seen. The `.config` an earlier build
+wrote is full of them: every module that run did not want is in there as
+`# CONFIG_PACKAGE_kmod-x is not set`, which is a value. Seeding
+`CONFIG_ALL_KMODS=y` into that file and running `defconfig` again therefore leaves
+the flag in place, every module still off, and the archive as narrow as it was.
+MEASURED, run `39218437654`, which ran the build script twice in one job: 45 kmod
+packages `=y`, **0 `=m`**, `kmod-wireguard` not set -- with the flag visibly
+present and the post-defconfig seed gate green, which is what makes this worth a
+section of its own.
+
+`scripts/build-firmware.sh` therefore counts the effect after `defconfig` instead
+of trusting the flag: `--kmods all` must leave at least `KMODS_ALL_MIN` (100 by
+default) modules selected `=m`, and every name passed to `--kmods a,b,c` must come
+out `=y` or `=m`. Either check failing stops the build, prints the counts, and
+names the fix:
+
+```
+rm -f <tree>/.config
+```
+
 Two consequences of that mechanism are worth knowing before touching it:
 
 * The module's kernel symbol does **not** have to be listed in
@@ -93,7 +122,7 @@ input takes `all`, `image` or a list) and passes `image` to the initramfs job, w
 publishes no archive. Two checks keep a release from publishing an archive that
 404s: `kernel-patches.yml` runs `--kmods all` plus
 `tools/check_kmods.py --require-all-kmods --require-package kmod-wireguard
---min-kmods 60` in about a minute, and `build.yml` checks after the publisher that
+--min-kmods 1000` in about two minutes, and `build.yml` checks after the publisher that
 `pages/` really contains the modules the run promised -- before anything is pushed
 to `gh-pages`.
 
