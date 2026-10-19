@@ -13,6 +13,12 @@
 # used to leave a stale `=y` behind, and the sysupgrade image built that way was
 # 12,058,913 B with the squashfs at 0x760000 instead of 9,437,473 B at 0x3A0000.
 #
+# It also covers the check that a --kmods selection took effect, which is a
+# different question from whether the flag survived: `make defconfig` keeps the
+# values the .config it reads already has, so a second run over a tree that was
+# configured without --kmods leaves CONFIG_ALL_KMODS=y in place and every module
+# still off.  MEASURED, run 39218437654: 45 kmod package(s) =y, 0 =m.
+#
 # Usage: tools/test_build_firmware.sh      (no dependencies beyond bash/sed/grep)
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
@@ -24,6 +30,13 @@ trap 'rm -rf "$WORK"' EXIT
 # drift into testing a stale duplicate of them.
 sed -n '/^set_cfg() {/,/^}/p;/^set_cfg_off() {/,/^}/p;/^report_build_failure() {/,/^}/p;/^check_target_kernel_config() {/,/^}/p' \
 	scripts/build-firmware.sh > "$WORK/helpers.sh"
+# The selection-effect check is top-level code rather than a function, so it is
+# extracted on its own and run in a subshell with the variables it reads.
+sed -n '/^# >>> kmods-effect/,/^# <<< kmods-effect$/p' scripts/build-firmware.sh > "$WORK/kmods-effect.sh"
+if [ ! -s "$WORK/kmods-effect.sh" ]; then
+	echo "!! could not extract the --kmods selection check from scripts/build-firmware.sh"
+	exit 1
+fi
 if [ ! -s "$WORK/helpers.sh" ]; then
 	echo "!! could not extract set_cfg/set_cfg_off/report_build_failure/check_target_kernel_config from scripts/build-firmware.sh"
 	exit 1
@@ -143,7 +156,7 @@ echo "== --kmods seeds the modules, and as =m rather than =y"
 # mtd4 to fit in -- so a module meant for the published archive must be =m.  The
 # seeding block is extracted rather than copied, so this cannot drift into testing
 # a stale duplicate of it.
-sed -n '/^if .*KMODS.*all.*then$/,/^fi$/p' scripts/build-firmware.sh > "$WORK/kmods.sh"
+sed -n '/^# >>> kmods-seeding/,/^# <<< kmods-seeding$/p' scripts/build-firmware.sh > "$WORK/kmods.sh"
 if [ ! -s "$WORK/kmods.sh" ]; then
 	echo "  FAIL could not extract the --kmods seeding block"; fails=$((fails + 1))
 else
@@ -282,6 +295,78 @@ check_target_kernel_config "$KCFG" 0 \
 check_target_kernel_config "$WORK/no-such-config" 0 \
 	&& echo "  ok   a missing config file is not an error" \
 	|| { echo "  FAIL a missing config file was refused"; fails=$((fails + 1)); }
+
+echo "== --kmods all, and whether the selection actually happened"
+# Running `make defconfig` over a .config that already exists keeps the values in
+# it: every `# CONFIG_PACKAGE_kmod-x is not set` line an earlier run wrote stays,
+# a default is applied only to symbols kconfig has not seen, and the flag the
+# seeding step wrote is present the whole time.  Run 39218437654 did exactly that
+# -- one job, two invocations of the script -- and produced 45 modules =y, 0 =m,
+# with CONFIG_ALL_KMODS=y in .config and the post-defconfig gate green.  The
+# archive from that tree would have held the image's own modules and nothing else.
+run_effect() { # run_effect <kmods> <kmod-list> <cfg> <min>
+	KMODS="$1" KMOD_LIST="$2" CFG="$3" KMODS_ALL_MIN="$4" \
+		bash -c '. "$1"' _ "$WORK/kmods-effect.sh" 2>&1
+}
+STALE="$WORK/stale.config"
+{ i=0; while [ $i -lt 45 ]; do printf 'CONFIG_PACKAGE_kmod-fake%s=y\n' "$i"; i=$((i + 1)); done; } > "$STALE"
+out=$(run_effect all "" "$STALE" 100); rc=$?
+case "$out" in
+	*"selected only 0 kernel module(s) as =m"*)
+		echo "  ok   an all-kmods selection that selected nothing is refused" ;;
+	*)	echo "  FAIL the reuse case was accepted: $out"; fails=$((fails + 1)) ;;
+esac
+[ "$rc" -ne 0 ] && echo "  ok   and it reports failure" || { echo "  FAIL it did not fail"; fails=$((fails + 1)); }
+case "$out" in
+	*"rm -f $STALE"*)
+		echo "  ok   and it names the fix, with the path" ;;
+	*)	echo "  FAIL it does not say what to do: $out"; fails=$((fails + 1)) ;;
+esac
+case "$out" in
+	*"45 kernel module(s) =y"*)
+		echo "  ok   the counts are printed, so the number is in the log" ;;
+	*)	echo "  FAIL the counts are not printed: $out"; fails=$((fails + 1)) ;;
+esac
+
+# A real selection passes, and prints both counts.
+REAL="$WORK/all.config"
+printf 'CONFIG_ALL_KMODS=y\nCONFIG_PACKAGE_kmod-fake0=y\nCONFIG_PACKAGE_kmod-wireguard=m\nCONFIG_PACKAGE_kmod-udptunnel4=m\n' > "$REAL"
+out=$(run_effect all "" "$REAL" 2) \
+	&& echo "  ok   a selection of 2 modules passes a floor of 2" \
+	|| { echo "  FAIL a real selection was refused: $out"; fails=$((fails + 1)); }
+case "$out" in
+	*"1 kernel module(s) =y"*"2 =m"*)
+		echo "  ok   the =y and =m counts are reported separately" ;;
+	*)	echo "  FAIL the split is not reported: $out"; fails=$((fails + 1)) ;;
+esac
+
+echo "== --kmods with a list, and a package that did not get selected"
+# A name the tree knows but that is not selected is the same reuse case, and the
+# gate above cannot see it: the seed is in .config, kconfig simply kept the `is
+# not set` line that was already there.
+out=$(run_effect kmod-wireguard kmod-wireguard "$STALE" 100); rc=$?
+case "$out" in
+	*"not selected in .config"*"kmod-wireguard"*)
+		echo "  ok   a requested module that was not selected is refused" ;;
+	*)	echo "  FAIL a module that was not selected was accepted: $out"; fails=$((fails + 1)) ;;
+esac
+[ "$rc" -ne 0 ] && echo "  ok   and it reports failure" || { echo "  FAIL it did not fail"; fails=$((fails + 1)); }
+out=$(run_effect kmod-wireguard kmod-wireguard "$REAL" 100) \
+	&& echo "  ok   the same request against a config that has it passes" \
+	|| { echo "  FAIL a selected module was refused: $out"; fails=$((fails + 1)); }
+# =y counts too: something else in the tree may have turned the module on, and
+# that is still a module this build produces and publishes.
+printf 'CONFIG_PACKAGE_kmod-wireguard=y\n' > "$WORK/all-y.config"
+out=$(run_effect kmod-wireguard kmod-wireguard "$WORK/all-y.config" 100) \
+	&& echo "  ok   a module the image itself selects as =y is accepted" \
+	|| { echo "  FAIL =y was treated as absent: $out"; fails=$((fails + 1)); }
+
+echo "== and --kmods image checks nothing, because it promises nothing"
+# The default must stay quiet: an image-only build is not making a promise about
+# the archive, and a floor on it would fail every ordinary build.
+out=$(run_effect image "" "$STALE" 100) \
+	&& echo "  ok   --kmods image passes over a stale config" \
+	|| { echo "  FAIL the default was refused: $out"; fails=$((fails + 1)); }
 
 echo
 if [ "$fails" -ne 0 ]; then

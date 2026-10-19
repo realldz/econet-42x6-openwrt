@@ -384,6 +384,7 @@ fi
 # package without installing it, which is the whole point of an archive users
 # install from later.
 # ---------------------------------------------------------------------------
+# >>> kmods-seeding (extracted by tools/test_build_firmware.sh)
 if [ "$KMODS" = "all" ]; then
 	echo "==> Seeding CONFIG_ALL_KMODS=y (every module this kernel config can build)"
 	set_cfg "CONFIG_ALL_KMODS" "y"
@@ -395,6 +396,7 @@ elif [ "$KMODS" != "image" ]; then
 		set_cfg "CONFIG_PACKAGE_$kmod" "m"
 	done
 fi
+# <<< kmods-seeding
 
 # ---------------------------------------------------------------------------
 # The target kernel config must not ask for modules whose sources this repository
@@ -497,6 +499,69 @@ EOF
 	exit 1
 fi
 echo "    all $(grep -c . "$SEEDED") symbol(s) present"
+
+# ---------------------------------------------------------------------------
+# A flag that survived is not the same as an effect.  `make defconfig` keeps the
+# values the .config it reads already carries -- including
+# `# CONFIG_PACKAGE_kmod-wireguard is not set` -- and applies a default only to
+# symbols it has not seen.  So a tree that has already been through defconfig
+# without --kmods keeps every module off even when CONFIG_ALL_KMODS=y is seeded
+# into it: the flag is in .config, the gate above passes, and the archive
+# published from that build is lean with nothing to show why.  MEASURED, run
+# 39218437654, which did exactly that by running this script twice in one job:
+# 45 kmod package(s) =y, 0 =m, kmod-wireguard not set.  Count the effect here
+# rather than trusting the flag; KMODS_ALL_MIN is the floor below which an
+# all-kmods selection cannot plausibly be real (the stale case leaves 0, the
+# image's own set is 46, a real all-kmods config leaves hundreds).
+# ---------------------------------------------------------------------------
+# >>> kmods-effect (extracted by tools/test_build_firmware.sh)
+KMODS_ALL_MIN=${KMODS_ALL_MIN:-100}
+if [ "$KMODS" = "all" ]; then
+	KMODS_M=$(grep -cE '^CONFIG_PACKAGE_kmod-[A-Za-z0-9_+-]*=m$' "$CFG" || true)
+	KMODS_Y=$(grep -cE '^CONFIG_PACKAGE_kmod-[A-Za-z0-9_+-]*=y$' "$CFG" || true)
+	echo "    $KMODS_Y kernel module(s) =y (in the image), $KMODS_M =m (built and published)"
+	if [ "$KMODS_M" -lt "$KMODS_ALL_MIN" ]; then
+		cat >&2 <<EOF
+
+!! --kmods all selected only $KMODS_M kernel module(s) as =m, fewer than the
+   $KMODS_ALL_MIN this check treats as a real selection.  CONFIG_ALL_KMODS=y is in
+   .config, so --kmods all did what it was asked to; the selection still did not
+   happen.  That is what reusing a .config produces: defconfig keeps the
+   '# CONFIG_PACKAGE_kmod-... is not set' lines an earlier run wrote, and a default
+   is only applied to symbols it has not seen.  The archive built from this tree
+   would hold the image's own $KMODS_Y modules and nothing else.
+
+   Start from a fresh configuration and build again:
+
+       rm -f $CFG
+
+   and see docs/packages.md, "Which modules a release publishes".
+EOF
+		exit 1
+	fi
+elif [ "$KMODS" != "image" ]; then
+	KMODS_BAD=""
+	for kmod in $KMOD_LIST; do
+		grep -qE "^CONFIG_PACKAGE_$kmod=[my]$" "$CFG" || KMODS_BAD="$KMODS_BAD $kmod"
+	done
+	if [ -n "$KMODS_BAD" ]; then
+		cat >&2 <<EOF
+
+!! --kmods asked for kernel module(s) that are not selected in .config:
+      $KMODS_BAD
+
+   A package the tree does not know is reported by the gate above.  A package the
+   tree does know and still did not select is the reuse case: defconfig keeps the
+   '# CONFIG_PACKAGE_kmod-... is not set' line an earlier run left, so the seed was
+   rewritten by the gate and then ignored by this one.  Start from a fresh
+   configuration:
+
+       rm -f $CFG
+EOF
+		exit 1
+	fi
+fi
+# <<< kmods-effect
 
 echo
 echo "==> make -j$JOBS"

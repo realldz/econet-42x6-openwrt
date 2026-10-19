@@ -79,6 +79,15 @@ jobs:
         # so `make defconfig` is the same one the real build uses.
         run: |
           set -e
+          # Start from a fresh configuration, as a release build does.  `make
+          # defconfig` keeps the values the .config it reads already carries, so a
+          # second invocation over the tree the step above configured leaves every
+          # kmod symbol at `# CONFIG_PACKAGE_kmod-x is not set` and CONFIG_ALL_KMODS
+          # with nothing to promote: MEASURED, run 39218437654, 45 kmod packages =y
+          # and 0 =m with the flag present and the seed gate green.  That is what
+          # this step exists to catch, and build-firmware.sh now counts the effect
+          # itself rather than trusting the flag.
+          rm -f "$OWRT_DIR/.config"
           BUILD_TARGET=target/linux/prepare \
             scripts/build-firmware.sh "$OWRT_DIR" --variant m2 --no-packages --no-feeds \
               -j "$(nproc)"
@@ -109,6 +118,15 @@ jobs:
         # half in the release build that gets it wrong.
         run: |
           set -e
+          # Start from a fresh configuration, as a release build does.  `make
+          # defconfig` keeps the values the .config it reads already carries, so a
+          # second invocation over the tree the step above configured leaves every
+          # kmod symbol at `# CONFIG_PACKAGE_kmod-x is not set` and CONFIG_ALL_KMODS
+          # with nothing to promote: MEASURED, run 39218437654, 45 kmod packages =y
+          # and 0 =m with the flag present and the seed gate green.  That is what
+          # this step exists to catch, and build-firmware.sh now counts the effect
+          # itself rather than trusting the flag.
+          rm -f "$OWRT_DIR/.config"
           BUILD_TARGET=target/linux/prepare \
             scripts/build-firmware.sh "$OWRT_DIR" --variant m2 --no-packages --no-feeds \
               --kmods all -j "$(nproc)"
