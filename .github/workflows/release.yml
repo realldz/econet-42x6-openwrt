@@ -272,12 +272,11 @@ jobs:
               echo "0x3A0000.  Use \`kmods: release\`."
             elif [ "$KMODS" = "release" ]; then
               echo "It carries the image's own modules plus the curated list in"
-              echo "\`scripts/kmods-release.txt\`: \`kmod-wireguard\`, \`kmod-tcp-bbr\`,"
-              echo "\`kmod-nft-fullcone\`, \`kmod-nf-nathelper\`, \`kmod-ifb\` +"
-              echo "\`kmod-sched-cake\`, \`kmod-tun\`, \`kmod-veth\`, \`kmod-vxlan\`,"
-              echo "\`kmod-gre\`, \`kmod-batman-adv\`, \`kmod-jool\` and \`kmod-ovpn-dco\`,"
-              echo "with the packages they depend on.  None of them are installed in the"
-              echo "image."
+              echo "\`scripts/kmods-release.txt\`: WireGuard, BBR, CAKE and IFB for SQM,"
+              echo "TUN/TAP, veth, macvlan, VXLAN, GRE and 6in4 tunnels, the NAT helpers"
+              echo "and \`kmod-nft-arp\`, with the packages they depend on.  That is 14"
+              echo "names; OpenWrt's own package list for the image is unchanged, so none"
+              echo "of them are installed in the image."
               echo
               echo "That list is the part that fits.  \`--kmods all\` was the first shape"
               echo "and it does not fit: MEASURED (run 39231907469), the all-kmods"

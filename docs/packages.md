@@ -52,28 +52,89 @@ worth writing down.
 
 | flag | what it selects |
 |---|---|
-| `--kmods image` | only what the image itself carries (the default) |
+| `--kmods image` | only what the image itself carries (the script's own default) |
+| `--kmods release` | the list in `scripts/kmods-release.txt`, which is what a release ships |
 | `--kmods all` | every kernel module this kernel config can build, minus `--kmods-exclude` |
 | `--kmods a,b,c` | those packages, selected as `=m` |
 | `--kmods-exclude a,b` | with `--kmods all`: keep these off (default: `kmod-ipt-rtpengine`) |
 
-`--kmods all` sets `CONFIG_ALL_KMODS=y`, and that is the whole mechanism: every
-non-hidden `kmod-*` package then defaults to `=m` (`config/Config-build.in:42`
-declares the symbol; `scripts/package-metadata.pl:371-383` gives each generated
-package `default m if ALL||ALL_NONSHARED||ALL_KMODS`). For a package symbol `=m`
-means "build and package it", not "build it into the kernel" -- so the module is
-compiled and published, and it is **not** added to the image. That distinction is
-the point: the persistent image has only `0x3A0000` of mtd4 to fit in, and a module
+A package symbol `=m` means "build and package it", not "build it into the
+kernel": the module is compiled and published, and it is **not** added to the
+image. The persistent image has only `0x3A0000` of mtd4 to fit in, so a module
 somebody installs later belongs in the archive rather than in the flash image.
 
-MEASURED on a fresh configuration, run `39219228917`: `CONFIG_ALL_KMODS=y` leaves
-45 kmod packages `=y` -- the target's own, which is what the image carries -- and
-1110 `=m`, every one of them built and published. Under `--variant m2`, whose
-package list carries one module the bare target does not, the release run
-`39219693393` printed `46 kernel module(s) =y (in the image), 1149 =m (built and
-published)`, and that build then failed in a feed package the archive never needed
--- see "Feed kernel modules" below. That is the shape of the archive a release is
-meant to serve: the image unchanged, the archive wider by an order of magnitude.
+### A release ships a list, because `--kmods all` does not fit
+
+`--kmods all` sets `CONFIG_ALL_KMODS=y`, and every non-hidden `kmod-*` package
+then defaults to `=m` (`config/Config-build.in:42` declares the symbol;
+`scripts/package-metadata.pl:371-383` gives each generated package `default m if
+ALL||ALL_NONSHARED||ALL_KMODS`). MEASURED on a fresh configuration, run
+`39219228917`: 45 kmod packages `=y` -- the target's own, which is what the image
+carries -- and 1110 `=m`. Under `--variant m2`, run `39231907469` printed `46
+kernel module(s) =y (in the image), 1148 =m (built and published)`.
+
+That build was clean, and the image it produced was not publishable. The flash gate
+in `tools/verify_image.py` refused it:
+
+```
+openwrt-airoha-en7523-econet_vgp-42x6v1-squashfs-sysupgrade.bin: 9699624 bytes
+    FAIL squashfs at 0x3E0000 > 0x3A0000 (mtd4 'kernel' partition)
+1 image(s) FAILED the flash gate -- do not publish or flash them
+```
+
+The rootfs started 256 KiB further in because the kernel grew: the FIT totalsize is
+3,986,924 B against a mtd4 of 3,801,088 B (`0x3A0000`). The published v0.1.0-m2
+image is 3,769,092 B of FIT, whose rootfs is padded to exactly `0x3A0000` -- 31 KB
+of headroom, and no more. So the all-kmods selection does not fit this board. The
+gate that says so is `--warn-only` inside the Build step, because a build machine
+cannot know what a board's partition table looks like, and hard in the Verify step,
+which is where that run stopped: nothing was published.
+
+It is also structural, which is the part worth taking away: a module cannot be
+installed from a different selection at all.
+`include/kernel-defaults.mk:132` writes
+
+```sh
+grep '=[ym]' $(LINUX_DIR)/.config.set | LC_ALL=C sort | $(MKHASH) md5 > $(LINUX_DIR)/.vermagic
+```
+
+and `include/kernel.mk:214` gives every module
+`EXTRA_DEPENDS:=kernel (=$(LINUX_VERSION)~$(LINUX_VERMAGIC)-r$(LINUX_RELEASE))`. The
+version of a module therefore carries the md5 of the *whole* kernel config -- on
+v0.1.0-m2, `kernel-6.18.54~ba6507fb3e4420e857c74d5e042e6c5e-r1.apk`. Widening the
+selection changes the kernel version every module names, and `apk` would refuse the
+install. Building the archive from a second tree, the way OpenWrt's own builders
+separate images from feeds, does not help here: their images and their kmods come
+from one configuration, and that configuration is what does not fit.
+
+What ships is the list that fits: `scripts/kmods-release.txt`, one package name per
+line, selected with `--kmods release`.
+
+```
+kmod-wireguard      kmod-tcp-bbr          kmod-nf-nathelper
+kmod-nf-nathelper-extra                   kmod-ifb
+kmod-sched-cake     kmod-tun              kmod-veth
+kmod-macvlan        kmod-vxlan            kmod-gre
+kmod-ip6-tunnel     kmod-sit              kmod-nft-arp
+```
+
+Only modules the pinned tree declares can be in it, because a release build runs
+without feeds (`release.yml`, `feeds="${IN_FEEDS:-false}"`) and a feed package is
+not in that tree. Three names were removed for that reason after gate run
+`39246509668` reported them missing: the pinned tree declares no
+`kmod-nft-fullcone` at all, and what the feeds call `kmod-jool` and
+`kmod-ovpn-dco` are `kmod-jool-netfilter` and `kmod-ovpn-backports` in
+directories a feedless build never reads. A user who wants one of those needs
+`feeds: true`, and adding a name here only works together with that.
+
+Each is built as `=m` and published with the packages it depends on; none of them
+is installed into the image. Adding a name is free only while kconfig can keep it a
+module: a symbol declared `bool` forces the code into the kernel instead, which is
+where most of the all-kmods growth came from. The loop is: edit the file, run the
+`kernel-patches.yml` gate (minutes, and it seeds the real list with the feeds
+present), then a release run, whose flash gate prints the squashfs offset and
+refuses the image once it passes `0x3A0000`. [Trap 16 in ci.md](ci.md) is the short
+version of why this is a list.
 
 ### `--kmods all` does nothing on a tree that is already configured
 
@@ -99,6 +160,9 @@ rm -f <tree>/.config
 ```
 
 ### Feed kernel modules, and the one that does not build here
+
+Nothing in the release ships `--kmods all` any more, and this is what it also
+reached, because a later reader will try it again.
 
 `CONFIG_ALL_KMODS=y` does not distinguish where a module is declared, so it also
 selects the kernel modules that live inside the *feeds* -- and a feed package
@@ -161,15 +225,19 @@ the whole image has to be rebuilt with it selected:
 ./scripts/build-firmware.sh openwrt --variant m2 --kmods kmod-wireguard,kmod-udptunnel4
 ```
 
-`release.yml` builds its sysupgrade job with `--kmods all` by default (the `kmods`
-input takes `all`, `image` or a list) and passes `image` to the initramfs job, which
-publishes no archive; the exclusions above apply to both, since the list is the
-script's default rather than something a workflow passes. Two checks keep a release from publishing an archive that
-404s: `kernel-patches.yml` runs `--kmods all` plus
-`tools/check_kmods.py --require-all-kmods --require-package kmod-wireguard
---min-kmods 1000` in about two minutes, and `build.yml` checks after the publisher that
-`pages/` really contains the modules the run promised -- before anything is pushed
-to `gh-pages`.
+`release.yml` builds its sysupgrade job with `--kmods release` by default (the
+`kmods` input takes `release`, `all`, `image` or a list, and a tag push uses
+`release`) and passes `image` to the initramfs job, which publishes no archive. The
+exclusions above are the script's default rather than something a workflow passes,
+so they apply to any `--kmods all` a user runs by hand.
+
+Two checks keep a release from publishing an archive that 404s.
+`kernel-patches.yml` seeds `scripts/kmods-release.txt` into a prepared tree with
+the feeds on and runs `tools/check_kmods.py --require-package <every name>`, so a
+typo or a package this tree cannot select fails in minutes instead of two hours;
+the step above it proves the `ALL_KMODS` mechanism on the tree's own modules.
+`build.yml` then checks after the publisher that `pages/` really contains every
+module the run promised -- before anything is pushed to `gh-pages`.
 
 ## What is published, and where
 
@@ -317,7 +385,7 @@ running an older image still needs the modules built for its kernel.
   `tools/verify_publish.py` checks the release assets, the `gh-pages` branch and
   the served URLs (20 checks -- see [ci.md](ci.md)). That release published the 46
   modules it had selected, correctly, and no `kmod-wireguard` -- which is the gap
-  `--kmods all` closes, and the reason the module list is now part of what a
+  `--kmods release` and `--kmods all` close, and the reason the module list is now part of what a
   release promises rather than a side effect of the package list.
   What remains `[not verified]` on hardware is the install itself: `apk add
   --allow-untrusted <kmod>` against that URL, and the negative case, where a module

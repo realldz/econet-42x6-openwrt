@@ -177,7 +177,11 @@ apk add --allow-untrusted <package>
 Which modules that repository holds is a decision made at build time, and one the
 board cannot repair afterwards: an archive carries the modules the image was built
 with, and a plain M2 build selects 46 of them -- `kmod-wireguard` is not among
-them, because nothing in the image needs it. Releases built with `--kmods all`
+them, because nothing in the image needs it. Releases publish the curated list in
+[`scripts/kmods-release.txt`](scripts/kmods-release.txt) -- `--kmods release`, which
+carries `kmod-wireguard` and thirteen more; `--kmods all` is measured not to fit this
+board's kernel partition ([packages.md](docs/packages.md#a-release-ships-a-list-because---kmods-all-does-not-fit)),
+so it is not what a release uses. Releases built with `--kmods all`
 carry every kernel module this kernel can build, so a module you install months
 later is there; `--kmods a,b,c` narrows that to a list, and
 `--kmods-exclude a,b` keeps a package out of it. The one name excluded by default

@@ -16,19 +16,30 @@
 # so modules from a different selection cannot be installed on this image at
 # all -- the archive has to come from the image's own configuration.
 #
+# Why only core modules: a release build runs without feeds (release.yml,
+# `feeds="${IN_FEEDS:-false}"`, which is a publishing decision about hundreds of
+# megabytes of userspace packages), so a name declared by a feed is not in the
+# tree the release builds.  Measured, gate run 39246509668 with the feeds on:
+# kmod-jool and kmod-ovpn-dco did not survive defconfig -- what exists is
+# feeds/packages/net/jool's `kmod-jool-netfilter` and
+# feeds/packages/kernel/ovpn-dco's `kmod-ovpn-backports` -- and nothing in the
+# pinned tree declares `kmod-nft-fullcone` at all.  A user who wants a feed
+# module needs `feeds: true`, and adding one here only works together with that.
+#
 # Adding a name is free only while kconfig keeps it a module.  Add one, run the
 # kernel-patches gate, then a release run: the flash gate prints the squashfs
 # offset and refuses the image once it passes 0x3A0000.
 kmod-wireguard
 kmod-tcp-bbr
-kmod-nft-fullcone
 kmod-nf-nathelper
+kmod-nf-nathelper-extra
 kmod-ifb
 kmod-sched-cake
 kmod-tun
 kmod-veth
+kmod-macvlan
 kmod-vxlan
 kmod-gre
-kmod-batman-adv
-kmod-jool
-kmod-ovpn-dco
+kmod-ip6-tunnel
+kmod-sit
+kmod-nft-arp

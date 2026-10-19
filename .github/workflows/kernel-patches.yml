@@ -144,11 +144,11 @@ jobs:
 
       - name: The release list names modules this tree can actually select
         # The list in scripts/kmods-release.txt is what release.yml ships, and a
-        # typo in it costs a two-hour release run.  This step costs minutes: it
-        # seeds the same list into a prepared tree with the feeds present (jool,
-        # ovpn-dco and batman-adv live in feeds/packages, so --no-feeds would
-        # report them as missing names rather than missing packages) and lets
-        # build-firmware.sh's own post-defconfig gate do the reporting.
+        # name in it that this tree cannot select costs a two-hour release run to
+        # find out -- which is exactly what gate run 39246509668 found, three
+        # names at a time.  This step costs minutes, and it mirrors the release:
+        # no feeds, because `feeds` is off by default there and a feed module is
+        # therefore not in the tree a release builds.
         #
         # The step above proves the ALL_KMODS mechanism on the tree's own
         # modules; this one proves the exact list that gets published.
@@ -157,7 +157,7 @@ jobs:
           rm -f "$OWRT_DIR/.config"
           BUILD_TARGET=target/linux/prepare \
             scripts/build-firmware.sh "$OWRT_DIR" --variant m2 --no-packages \
-              --kmods release -j "$(nproc)"
+              --no-feeds --kmods release -j "$(nproc)"
           pkgs=$(sed -e 's/#.*//' -e 's/[[:space:]]//g' scripts/kmods-release.txt |
                    grep -v '^$' | sed 's/^/--require-package /' | paste -sd' ' -)
           echo "  checking: $pkgs"
