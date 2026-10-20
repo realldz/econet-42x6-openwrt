@@ -374,6 +374,74 @@ exist is `net/pon` plus `pon-tool`.
    optics checks and the BOB calibration location.
 5. PR #24577's `econet-omcid` and `luci-app-econet-xpon`, read for shape rather than copied, and
    Cris7015's `notes/` for what an EN757x bring-up actually looks like day by day.
+6. PonWrt's `airoha-xpon-xgpon.c` (see 12.3) for the newest, best-commented sequencing of the
+   sibling XG-PON MAC, and `airoha-xpon-regs.h` for the annotated register map of that family.
+
+### 12.3 `pbs05/ponwrt` (checked 2026-10-20, during the M4 wait)
+
+ImmortalWrt fork that adds Airoha **AN7581 / AN7583** PON support (FiberHome, Gemtek, Nokia
+XG-040G, UnionMan, ZNXT, H3C boards). Not an EN7523 GPON port, Its airoha kernel target keeps the upstream *immortalwrt* `airoha` tree plus
+**v6.19-v7.4 airoha networking patches** (airoha, eth, NPU, PCS), so the EN7523 subtarget
+carries the modern upstream EN7523 SoC drivers (`PINCTRL_AIROHA_EN7523`,
+`COMMON_CLK_EN7523`, `SPI_AIROHA_EN7523`, reset controller). What it does NOT have is an
+EN7523 GPON path; PON lives in two feeds, `pbs05/openwrt-pon-drivers` and
+`pbs05/openwrt-pon-userspace`, and both gate on `TARGET_airoha_an7581||an7583`
+(`airoha,an7581-xpon-mac`, MAC window `0x1fb65000`). GPON mode is explicitly marked
+"not yet implemented" in its README (XG-PON and 10G-EPON are the tested modes). It also
+does NOT reuse `net/pon`/`omci.genl`: the driver exposes its own generic netlink family
+`xpon` v1 and userspace is a Rust daemon -- a different UAPI from the kiwironic stack
+this port uses, so nothing ports directly to our M4 problem.
+
+What is worth reading for M4:
+
+* **`airoha-xpon-regs.h`** -- a clean, annotated register map of the AN7581 XG-PON MAC
+  (window `0x1fb65000`): INT enable/status at `0x40/0x44`, activation state `0x0104`,
+  response time `0x0108`, ranging delay `0x010c`, EQD `0x0114`, T-CONT/GEM config at
+  `0x250/0x274`, debug counters in a window starting `0x0800`, and the XGTC counter at
+  `0x0940`. Useful mental cross-check against the EN7523 GPON MAC window
+  (`0x1fb60000`/`0x1fb64000`), e.g. when deciding whether `GPON_DBG_RX_GTC_CNT` at
+  `0x1fb64308` should be ticking (same family of counter).
+* **`airoha-xpon-xgpon.c` ordering comments** -- the best documented sequencing of this
+  PON MAC family in any public source: clear bootloader IRQ state before requesting the
+  MAC IRQ; the digital PHY IRQ is W1C; release the MAC reset **after** XGTC
+  synchronization and **before** O2_3 ("BEN/upstream TX remains disabled" until the
+  line is in); full PON PHY reinitialization when optical signal is present without
+  XGTC sync (recovery counter). Directly comparable with what `gpon_dev_init()` does in
+  the kiwironic tree -- those invariants are the shape to assert, whatever the register
+  offsets are.
+* **Data-path architecture** (`922`, `925`): their GDM2 PON netdev rides the shared
+  `airoha_eth` QDMA/NAPI machinery ("the Ethernet driver owns QDMA, DMA, IRQ and
+  NAPI"), control (OMCI/OAM) on dedicated control netdevs, and PPE offload metadata is
+  taught to `airoha_eth`. If M4's blocker turns out to be the IRQ/arming path, this
+  split is the reference architecture to adopt on the EN7523 side instead of inventing
+  one.
+* **EN7523 upstream drivers that can replace pieces of this port's fork patches**
+  (also relevant outside M4):
+  - `600-01..13` -- EN7523 clk converted to regmap/full `clk_hw`, `.set_rate`, and a
+    **reset controller** (`600-12`, v6.19: `en7523_rst_map[]`) that subsumes the
+    `en7523_reset_reset()` port this repository carries as `202-30`, plus the dtsi
+    `resets` wiring (`600-13`).
+  - `913` -- "clk: en7523: reset PCIE HB on init" (warm-boot PCIe fix): poke
+    `regmap_set_bits/clear_bits(clk_map, REG_RST_CTRL1, BIT(29))`. Note for the root-port
+    story in pcie-root-cause.md: this is a *reset* at clk init, not related to the bogus
+    BAR 0 (the defect that RAM recovery quirk already covers), but it is an upstream
+    treatment for the warm boot that could be measured on this board.
+  - `203-02` -- reset SCU IOMUX registers at pinctrl probe: plausibly the cleanest cure
+    for stale bootloader pinmux (the pad 28 / TX_DISABLE conflict that patch `202-29`
+    fixed by hand).
+  - `202-27` (v7.3) -- in-mainline tracking: upstream `pinctrl-en7523.c` arrives. **It
+    carries the same defect as the v2 bring-up here did**: `pon_pins[] = {28, 29, 30,
+    31, 32, 33}`; the TX_DISABLE pad (GPIO16, pin 28) must stay OUT of the PON group
+    (this port's `202-29` lesson), so adopting it needs that correction.
+  - `885` (i2c-mt7621 optional reset), `031/029-*` SPI EN7523/SNFI queue, `900`/`901`
+    (Airoha + mtk SNAND BMT support, vendor-compatible bad-block region) -- extras with
+    no blocking relevance today, kept on the shortlist for the next rebase.
+
+Verdict for this port: **no direct EN7523 GPON help** -- different SoC generation, GPON
+unimplemented, different UAPI -- but its sequencing comments, register map notes, and
+data-path split are the best-documented modern writing on this MAC family, and its
+EN7523 subtarget shows where the upstream parts of the kernel are heading, which hedges
+this repo's diverging fork patches.
 ---
 
 ## 13. M3, step 1: turning on I2C0 to settle where the laser sits (2026-10-08)

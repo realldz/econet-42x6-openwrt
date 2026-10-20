@@ -542,3 +542,15 @@ verbatim from the community branch.
 | The build succeeds but the UART is silent | Almost always the `TEXT_OFFSET` / `loadaddr` mismatch. Verify the image, then read [booting.md](booting.md). |
 | `make defconfig` drops `CONFIG_IB` | It depends on `!EXTERNAL_TOOLCHAIN`. Use the internal toolchain. |
 | The tools stage fails while configuring `tar` | Building as root in a container: export `FORCE_UNSAFE_CONFIGURE=1`. |
+## Release builds are not bit-reproducible against a local container build
+
+Measured on v0.1.2-m2 (2026-10-20): the sysupgrade image the CI release produced from the same
+commit is 9,437,480 bytes like the local container build, passes `verify_build.py` and
+`verify_image.py` identically, carries the same device-tree nodes (`pci@1,0`, `wifi@0,0`,
+`band@0`, `band@1`, `ethaddr@19f`) -- but differs in sha256 and in ~8.96 MB of the 9.44 MB file
+(the kernel payload region). The two builds are *functionally* the same source tree and both
+green; they are not byte-identical (host toolchain / host compiler differences between the
+GitHub runner and the local container). Consequence for verification: a sha256 recorded from a
+local build identifies the local build only; to fingerprint a published release, use the
+release's own `SHA256SUMS` asset. A board flashed with a local image does not need to match a
+later release artifact byte-for-byte.
