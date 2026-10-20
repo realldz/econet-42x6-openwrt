@@ -191,22 +191,29 @@
 			status = "okay";
 
 			/*
-			 * Without this property the driver calls of_get_ethdev_address() -> fails
-			 * -> eth_hw_addr_random(): a new MAC on every boot (verified: dmesg
-			 * "generated random MAC address ...", addr_assign_type = 1 =
-			 * NET_ADDR_RANDOM).
-			 * This is the U-Boot ethaddr on this board, also the MAC printed on the label.
-			 * The four lan1..lan4 ports (DSA user ports) inherit this MAC.
-			 * Cleaner upstream solution: an nvmem cell read from the env partition.
+			 * The identity of this unit comes out of its own flash, read by the
+			 * kernel: the `ethaddr` variable of the U-Boot environment (see the
+			 * u-boot-env partition) is exposed as an nvmem cell, and the driver
+			 * picks it up through of_get_ethdev_address(). Nothing in this
+			 * repository carries a per-unit value any more, and no boot-time
+			 * userspace script assigns a MAC.
 			 *
-			 * PLACEHOLDER: write YOUR unit's own address here.  The address of the
-			 * unit this support was developed on is redacted from this repository
-			 * on purpose -- reusing it would put a duplicate MAC on your network.
-			 * Keep the first octet as written: 02 is a valid unicast, locally
-			 * administered address, so a placeholder cannot collide with a
-			 * vendor-assigned assignment.
+			 * Without a cell the driver's of_get_ethdev_address() fails and it
+			 * calls eth_hw_addr_random(): eth0 gets a new address on every boot
+			 * (MEASURED: dmesg "generated random MAC address ...",
+			 * addr_assign_type = 1 = NET_ADDR_RANDOM). If the nvmem provider is
+			 * not up yet the call returns -EPROBE_DEFER and the driver defers
+			 * (airoha_eth.c), so the address is always read before the netdev is
+			 * registered.
+			 *
+			 * The index is the offset ADDED to the stored address: there is only
+			 * one address on the board, and drivers/nvmem/layouts/u-boot-env.c
+			 * runs eth_addr_add(mac, index) when the index is non-zero. Index 0 is
+			 * the address exactly as flashed -- the one printed on the label --
+			 * and is what the CPU port (GDM1) and the LAN bridge use.
 			 */
-			mac-address = [02 00 00 00 00 00];
+			nvmem-cells = <&ethaddr 0>;
+			nvmem-cell-names = "mac-address";
 
 			fixed-link {
 				speed = <10000>;
@@ -229,6 +236,14 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
+		/*
+		 * Per-port identity comes from flash too: DSA reads each port's MAC with
+		 * of_get_mac_address() (net/dsa/dsa.c) and uses it verbatim when it is not
+		 * all-zero (net/dsa/port.c, otherwise the port inherits its conduit's
+		 * address). The index is again the offset added to the single stored
+		 * address, so lan1..lan4 get base+1..base+4 and never collide with GDM1
+		 * (base+0) or the two radios (base+6, base+7).
+		 */
 		ports {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -239,6 +254,9 @@
 				phy-mode = "internal";
 				phy-handle = <&gsw_phy1>;
 				status = "okay";
+
+				nvmem-cells = <&ethaddr 1>;
+				nvmem-cell-names = "mac-address";
 			};
 
 			gsw_port2: port@2 {
@@ -247,6 +265,9 @@
 				phy-mode = "internal";
 				phy-handle = <&gsw_phy2>;
 				status = "okay";
+
+				nvmem-cells = <&ethaddr 2>;
+				nvmem-cell-names = "mac-address";
 			};
 
 			gsw_port3: port@3 {
@@ -255,6 +276,9 @@
 				phy-mode = "internal";
 				phy-handle = <&gsw_phy3>;
 				status = "okay";
+
+				nvmem-cells = <&ethaddr 3>;
+				nvmem-cell-names = "mac-address";
 			};
 
 			gsw_port4: port@4 {
@@ -263,6 +287,9 @@
 				phy-mode = "internal";
 				phy-handle = <&gsw_phy4>;
 				status = "okay";
+
+				nvmem-cells = <&ethaddr 4>;
+				nvmem-cell-names = "mac-address";
 			};
 
 			/* port 6 = CPU port, connected to MAC GDM1 */
@@ -533,6 +560,64 @@
 
 &pcie1 {
 	status = "okay";
+
+	/*
+	 * The MT7916 is the only device on this bus: /proc/bus/pci shows
+	 * `0001:01:00.0`, and domain 1 is pcie@1fa92000 (linux,pci-domain = <1>).
+	 * This node exists ONLY to give the radios a MAC.
+	 *
+	 * The PCI core attaches it to the device whose devfn matches `reg`
+	 * (drivers/pci/of.c, of_pci_find_child_device(); no compatible needed), and
+	 * mt76_eeprom_override() (eeprom.c of the mt76 package) then walks the
+	 * CHILDREN of this node for one whose `reg` equals the band index of the phy
+	 * it is overriding -- not the node itself, and not once per chip. Band 0 is
+	 * the 2.4 GHz radio, band 1 the 5 GHz one.
+	 *
+	 * Hence one cell per band. Index 6 = base+6 for 2.4 GHz and 7 = base+7 for
+	 * 5 GHz, the mapping this board has always used. A child `reg` matching no
+	 * band is ignored, and if a band's cell is missing or invalid the driver
+	 * keeps the zero MAC of the default eeprom blob and logs "Invalid MAC
+	 * address, using random address" -- a different address on every boot,
+	 * which is what happened before this node existed.
+	 */
+	/*
+	 * The MT7916 shows up as 0001:01:00.0 with the integrated root port
+	 * 0001:00:01.0 below pcie@1fa92000 (measured: sysfs path
+	 * platform/1fa92000.pcie/pci0001:00/0001:00:01.0/0001:01:00.0).  Without
+	 * this node the endpoint's PCI bus has no device-tree of_node, so
+	 * drivers/pci/of.c pci_set_of_node() bails immediately and the wifi PCI
+	 * device runs with fwnode == NULL -- mt76 then cannot walk the band
+	 * children and keeps the "Invalid MAC address, using random address"
+	 * fallback that used to happen.
+	 */
+	pci@1,0 {
+		reg = <0x00000800 0 0 0 0>;	/* devfn 0x08: bus 0001:00, dev 1, fn 0 */
+		device_type = "pci";
+		#address-cells = <3>;
+		#size-cells = <2>;
+
+		wifi@0,0 {
+			reg = <0x00010000 0 0 0 0>;	/* bus 0001:01, dev 0, fn 0 */
+
+			/* The band nodes are addressed by index, not by PCI convention. */
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			band@0 {
+				reg = <0>;
+
+				nvmem-cells = <&ethaddr 6>;
+				nvmem-cell-names = "mac-address";
+			};
+
+			band@1 {
+				reg = <1>;
+
+				nvmem-cells = <&ethaddr 7>;
+				nvmem-cell-names = "mac-address";
+			};
+		};
+	};
 };
 
 /*
@@ -642,6 +727,68 @@
 
 			gpon_serial: gpon-serial-number@2bc {
 				reg = <0x2BC 0xC>;
+			};
+		};
+
+		/*
+		 * U-Boot environment -- the only per-unit identity data on this board
+		 * that the kernel can read straight out of flash. READ-ONLY, and it is
+		 * shared with U-Boot: never write to it from Linux.
+		 *
+		 * DECLARED LAST ON PURPOSE. An MTD partition's index is its position in
+		 * this node, and the vendor U-Boot boots the kernel with
+		 * `root=/dev/mtdblock5` (MEASURED, /proc/cmdline). Appending here leaves
+		 * mtd0..mtd10 exactly as `cat /proc/mtd` shows them, so that cmdline and
+		 * every index in docs/booting.md stay valid. The region OVERLAPS
+		 * partition@0 (bootloader); the MTD core does not reject overlapping
+		 * partitions -- it only refuses to make a partition that is not
+		 * erase-block aligned WRITABLE (drivers/mtd/mtdpart.c,
+		 * allocate_partition()), which is what read-only means anyway.
+		 *
+		 * MECHANISM (why NOT "u-boot,env"): mtdcore registers one nvmem device
+		 * per MTD partition (mtd_nvmem_add()), so TWO nvmem devices share this
+		 * partition's of_node: mtd11's own nvmem, registered first at partition
+		 * creation, and the u-boot,env platform driver's nvmem, registered
+		 * later from the platform device. of_nvmem_cell_get() takes the FIRST
+		 * nvmem matching the cell's parent node (drivers/nvmem/core.c,
+		 * __nvmem_device_get(), bus_find_device()), so every consumer resolved
+		 * mtd11's cell-less nvmem and got -ENOENT forever -- MEASURED on
+		 * hardware: random MACs for eth and wifi, everything else verified
+		 * correct (mtd11 present, u-boot-env0 registered, env CRC valid).
+		 *
+		 * With "compatible = nvmem-cells" the mtdcore nvmem FOR THIS PARTITION
+		 * parses its own children as nvmem cells at registration
+		 * (nvmem_add_cells_from_legacy_of() -> nvmem_add_cells_from_dt()) --
+		 * exactly the device consumers resolve, so there is no ordering
+		 * ambiguity left. "fixed-layout" additionally makes the core apply the
+		 * mac-base fixup (nvmem_layout_parse_mac_base()).
+		 *
+		 * Cell reg (MEASURED with tools/check_dts_mac.py --dump on a LIVE mtd11
+		 * read: the vendor upgrade QFLOW writes the environment with its own
+		 * variable set, so the `ethaddr=` variable reorders whenever the stock
+		 * env is re-saved; the first build shipped 0x372 from a 41-variable
+		 * dump and silently missed on the 43-variable live window): the 16 KiB
+		 * window holds a 4-byte LE CRC32 then NUL-separated name=value text;
+		 * `ethaddr=` sits at 0x197 and its value
+		 * ("24:0b:2a:fc:a6:f0", 17 = 0x11 bytes) at 0x19F. 17 bytes is the
+		 * documented mac-base ASCII form (nvmem_mac_base_ascii_read():
+		 * mac_pton() + eth_addr_add(mac, index), the index coming from
+		 * #nvmem-cell-cells -- see GDM1 and the switch ports above). Re-run
+		 * --dump on a fresh read whenever the stock firmware touches the env.
+		 */
+		partition@7c000 {
+			label = "u-boot-env";
+			reg = <0x07C000 0x4000>;
+			read-only;
+
+			compatible = "nvmem-cells", "fixed-layout";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			ethaddr: ethaddr@19f {
+				reg = <0x19F 0x11>;
+				compatible = "mac-base";
+				#nvmem-cell-cells = <1>;
 			};
 		};
 	};

@@ -155,13 +155,26 @@ it. Reasoning and what would close it: [leds.md](leds.md) section 11.
 
 ### Network identity
 
-The MT7916 EFuse on this unit is blank, so the driver falls back to the default
-`mt7916_eeprom.bin` blob. That blob carries a zero MAC out of the box, which makes
-the driver invent a new address on every boot; writing your own unit's address into
-the blob (`tools/mt7916_eeprom_mac.py`) gives the interfaces a stable identity
-`[hardware]`. This is not per-unit calibration: the real per-unit data (MAC, GPON
-identity, laser BOB) sits in the vendor factory block in the trailing raw region
-and is **not** read yet. See [wifi.md](wifi.md) and [hardware.md](hardware.md).
+The base MAC is read at boot from the U-Boot environment (an `nvmem-cells` /
+`fixed-layout` partition with a `mac-base` cell at 0x19F): eth0, the four switch
+ports and both radio bands each consume it with their own index
+(base+0 .. base+4, bands base+6/base+7), so no pool of random-originated
+addresses reaches the interfaces. On the flashed image
+`econet_vgp42x6v1_openwrt_m2_mac_env19f_pci_20261020` (sha256 `169e59f9...`,
+2026-10-20) every address was measured on the board in one boot: eth0 f0,
+lan1..4 f1..f4, `phy0-ap0` f6, `phy1-ap0` f7, zero "random address" lines in
+`dmesg`. Reaching the radio bands needed one more device-tree hop than the
+obvious one: the MT7916 sits behind the integrated root port `0001:00:01.0`, so
+the DTS needs a `pci@1,0` wrapper before the kernel attaches an of_node to the
+endpoint and `mt76_eeprom_override()` can walk the `band@N` children. Full
+chain: [pcie-root-cause.md](pcie-root-cause.md) section 10 and
+[wifi.md](wifi.md). The MT7916 EFuse is blank and the fallback default
+`mt7916_eeprom.bin` blob carries a zero MAC; the DTS cells hide that, and
+`tools/mt7916_eeprom_mac.py` remains the fallback for Image Builder images
+whose tree does not carry the cell. This is not per-unit
+calibration: the real per-unit data (GPON identity, laser BOB) sits in the vendor
+factory block in the trailing raw region and is **not** read yet. See
+[wifi.md](wifi.md) and [hardware.md](hardware.md).
 
 ## M3 / M4 -- M3 done, M4 in progress (xPON probes, O1->O2, downstream open)
 

@@ -105,6 +105,19 @@ jobs:
           # `make target/linux/compile` instead.
           PYTHON=python3 tools/test_check_kmods.sh
 
+      - name: The flash-identity checker fails on what is absent
+        run: |
+          set -e
+          # Every MAC on this board now comes from one variable of the U-Boot
+          # environment at 0x7C000, read in the kernel, so there is no boot-time
+          # script that could patch an address in afterwards.  MEASURED on
+          # v0.1.0-m2 and v0.1.1-m2: an image missing that wiring comes up with a
+          # random address on eth0 and 00:00:00:00:00:00 on the LAN ports and both
+          # radios, and the only symptom is a boot log line nobody reads.
+          # check_dts_mac.py names the mistake and the arithmetic; this exercises
+          # it against 13 planted ones, on a copy of the real DTS and real patch.
+          PYTHON=python3 tools/test_check_dts_mac.sh
+
       - name: ShellCheck
         run: |
           sudo apt-get update -qq

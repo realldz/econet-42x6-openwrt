@@ -153,7 +153,9 @@ Two other things commonly go into `files/`:
 
 * `/lib/firmware/mediatek/mt7916_eeprom.bin` -- the default eeprom blob with your
   unit's MAC written into it, otherwise Wi-Fi comes up with a random address on
-  every boot ([`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py));
+  every boot ([`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py)); the
+  flashed sysupgrade image does not need it, its device tree reads the MAC from
+  the U-Boot environment in flash;
 * nothing else for LEDs or buttons: they are described in the device tree, so
   they work in any image built for this profile.
 

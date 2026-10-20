@@ -23,15 +23,34 @@ sections 3 and 4.
   than guessing: <https://openwrt.org/docs/guide-developer/toolchain/install-buildsystem>.
 
 This project does not pin a particular build host. What was used during
-development was a `debian:stable-slim` container with the workspace bind-mounted,
-which is a convenient way to keep the host clean:
+development was a `debian:stable-slim` container with the *repository*
+bind-mounted and the OpenWrt tree kept inside the container:
 
 ```bash
-docker run -d --name owrt -v "$PWD:/w" debian:stable-slim sleep infinity
+docker run -d --name owrt -v "$PWD:/repo" debian:stable-slim sleep infinity
 docker exec owrt bash -c 'apt-get update && apt-get install -y \
     build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
     gettext git libncurses-dev libssl-dev python3 rsync unzip zlib1g-dev \
     file wget ca-certificates'
+```
+
+That split is not a preference. A Windows bind mount is NTFS, and NTFS is not
+case-sensitive, so `make prereq` stops on it:
+
+```text
+Checking 'case-sensitive-fs'... failed.
+Build dependency: OpenWrt can only be built on a case-sensitive filesystem
+```
+
+`FORCE=1` is the wrong way past that, because the kernel tree really does carry
+files that differ only in case -- `include/uapi/linux/netfilter/xt_CONNMARK.h`
+next to `xt_connmark.h`, and more of the same -- and extracting a tarball over
+itself on a case-insensitive filesystem keeps one of each pair and drops the
+other. The build then fails much later, or links the wrong header. Only `dl/`,
+whose file names are unique, is safe on the host:
+
+```bash
+ln -s /w/dl /root/openwrt/dl       # optional: keep the download cache off the container
 ```
 
 If you build as `root` inside such a container, export
@@ -46,9 +65,12 @@ The patch series has exact context lines, so it only applies to one revision.
 That revision is recorded in [`scripts/pin.env`](../scripts/pin.env).
 
 ```bash
-git clone https://github.com/openwrt/openwrt.git ../openwrt
-git -C ../openwrt checkout 9b95be917b2804cf877ca05c078175b37a3a95bf
+git clone --filter=blob:none https://github.com/openwrt/openwrt.git /root/openwrt
+git -C /root/openwrt checkout 9b95be917b2804cf877ca05c078175b37a3a95bf
 ```
+
+On a Linux host `../openwrt`, next to the repository, works just as well. On
+Windows keep it out of the bind mount, for the reason in the previous section.
 
 Keep the tree outside this repository. The destination directory cannot be called
 `openwrt` *inside* the checkout, because this project already has a top-level
@@ -515,6 +537,7 @@ verbatim from the community branch.
 | A change to an mt76 patch has no effect | The patch is applied in the prepare step. Run `make package/kernel/mt76/clean` and rebuild (section 2). |
 | Wi-Fi driver and firmware are in the image, but no AP interface appears | No `wpad` flavour selected, so nothing calls `nl80211`. See section 4. |
 | `cp: cannot stat ...` from a script | Run the scripts by path, not from another directory. The scripts resolve their own location, but the working directory still has to be somewhere sensible. |
+| `Checking 'case-sensitive-fs'... failed` | The OpenWrt tree is on a Windows bind mount, and NTFS is case-insensitive. Do not pass `FORCE=1`: file names that differ only in case collide during extraction and one of each pair is silently lost. Keep the tree inside the container and only `dl/` on the host. |
 | Scripts fail with `$'\r': command not found` | The checkout got CRLF line endings. `.gitattributes` forces LF, so this only happens if the files were copied outside git. Re-clone, or convert with `dos2unix`. |
 | The build succeeds but the UART is silent | Almost always the `TEXT_OFFSET` / `loadaddr` mismatch. Verify the image, then read [booting.md](booting.md). |
 | `make defconfig` drops `CONFIG_IB` | It depends on `!EXTERNAL_TOOLCHAIN`. Use the internal toolchain. |

@@ -318,7 +318,29 @@ the driver invents an address.
 (The address in that line is redacted here. The driver generates a fresh random
 one on every boot, so the interface does not keep an address across reboots.)
 
-The fix is to write the unit's own addresses into the two slots that
+The current firmware image fixes this upstream of the blob, through two
+device-tree pieces. First, the board DTS reads the base `ethaddr` from the
+U-Boot environment and gives each radio band an nvmem cell on it (band 0 takes
+base + 6, band 1 takes base + 7; the wired ports take 0..4). Second -- and this
+is the half that actually made the difference -- the endpoint node must be
+reachable from the PCI device at all: the MT7916 shows up as 0001:01:00.0 under
+the integrated root port 0001:00:01.0, and until the DTS declared that port as
+a `pci@1,0` wrapper node, the kernel's `pci_set_of_node()` gave the endpoint
+device no of_node at all, so `mt76_eeprom_override()` had nothing to walk and
+kept the random-address fallback. With the wrapper in place the driver walks
+the endpoint's `band@N` children, resolves each `mac-address` cell through the
+nvmem core (the `mac-base` cell's read post-process adds the band index), and
+writes the bytes into `phy->macaddr`; the default blob stays zero, nothing
+per-unit enters the image and no random address appears on either radio.
+Verified on hardware 2026-10-20, image sha256 `169e59f9...`: `phy0-ap0` carries
+base+6 and `phy1-ap0` base+7, with zero "random address" lines in `dmesg`. The
+`pci_set_of_node()` chain, the devfn arithmetic and the dead ends are recorded
+in [pcie-root-cause.md](pcie-root-cause.md) section 10.
+
+The edit below remains for images built from the Image Builder, whose device
+tree does not carry the flash-backed cell.)
+
+The fix then is to write the unit's own addresses into the two slots that
 `mt7915/eeprom.h` defines for them. The blob is 4096 bytes
 (`MT7916_EEPROM_SIZE`) and only 12 bytes of it change:
 
@@ -410,8 +432,8 @@ insmod=0
 `eeprom load fail, use default bin` is **expected** and is not an error on this
 board, because the EFuse really is blank. What must not appear is the
 `Direct firmware load ... failed` line after it. The `Invalid MAC address` line in
-this log is the symptom that section 4 now removes: on this boot the address is
-driver-generated and will differ on the next one.
+this log is the symptom that section 4 removes -- on the flashed image by the
+U-Boot-environment cell, on Image Builder images by the blob edit.
 
 The PHYs appear, and `wlan0` can then be created:
 

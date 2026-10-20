@@ -54,7 +54,9 @@ build.
   redacted (placeholders in git, real serial from flash, empty password).
 * A **helper that writes a unit MAC into the default eeprom blob**
   ([`tools/mt7916_eeprom_mac.py`](tools/mt7916_eeprom_mac.py)), so a second board
-  does not come up wearing the first board's address.
+  does not come up wearing the first board's address -- only needed for Image
+  Builder images; the flashed sysupgrade image reads the MAC from environment
+  in flash itself.
 * Two **diagnostic kernel modules** (`kmod-pciedbg`, `kmod-ringwatch`), built but
   not installed by default, and **UART tooling** to boot to a shell, YMODEM an
   image into flash, paste a file into tmpfs and verify a built image.
@@ -123,8 +125,9 @@ Not working yet, and the reason why:
   is still unconfirmed. See [docs/pon-port.md](docs/pon-port.md) sections
   15-21.
 * **Per-unit calibration.** The EFuse is blank, so Wi-Fi falls back to the
-  default eeprom blob. The MAC address is no longer random -- a helper here
-  writes a unit address into that blob -- but the real per-unit calibration in
+  default eeprom blob. The MAC address comes from flash now (the board DTS reads
+  the base `ethaddr` from the U-Boot environment; gdm1, the four ports and both
+  radio bands each get their own slot), but the real per-unit RF calibration in
   the `factory` partition is still not read.
 * **Thermal sensor and watchdog.** Neither is configured.
 * **The WPS LED.** Fitted on the board, but not reachable from any pad we have

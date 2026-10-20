@@ -135,10 +135,18 @@ What that data is:
   vendor configuration that sits gzipped inside the `romfile` partition (mtd1), from which the stock
   firmware materialises `/etc/mac.conf`. The same value is what U-Boot reports as `ethaddr`.
 
-OpenWrt does **not** read any of it yet: the board device tree declares no nvmem cell and no
-`nvmem-layout`, so Wi-Fi takes its MAC from a patched default blob ([wifi.md](wifi.md) section 4) and
-the PON identity is unused. The intended way to consume the region is a read-only `fixed-partition`
-covering the factory block plus nvmem cells for the serial, the BOB blob and the base MAC -- laid out
+OpenWrt already reads the base MAC: the U-Boot environment at 0x7C000 carries
+`ethaddr` and the board DTS exposes it as an `nvmem-cells`/`fixed-layout`
+partition whose `mac-base` cell gdm1, the four switch ports and both radios
+consume ([ethernet.md](ethernet.md) section 2; the 17-byte ASCII `ethaddr=...`
+value sits at window offset 0x19F; note the offset is not a chip constant -- the
+vendor upgrade flow rewrites the environment with its own variable set, so the
+value reorders (measured 0x372 in a 41-variable dump, 0x19F in the 43-variable
+environment the live flash carries). `tools/check_dts_mac.py --dump <mtd11
+dump>` re-verifies the declaration against a fresh read). The rest is still unused: no cell is declared for
+the serial, the BOB blob or the PON identity. The intended way to consume the
+rest is a read-only `fixed-partition` covering the factory block plus nvmem
+cells for the serial and the BOB blob -- laid out
 so that the `BMT` at the end of the chip is never touched.
 
 ## 5. PCIe

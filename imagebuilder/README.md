@@ -28,7 +28,8 @@ Two things that commonly go into `files/`:
   [`openwrt/optional-configs/etc-config-wireless.example`](../openwrt/optional-configs/etc-config-wireless.example).
 * `/lib/firmware/mediatek/mt7916_eeprom.bin` -- the default eeprom blob with
   your unit's MAC written into it, otherwise Wi-Fi comes up with a random MAC
-  on every boot. Produce it with
+  on every boot (the Image Builder tree has no flash-backed MAC cell). Produce
+  it with
   [`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py).
 
 You can also drive the Image Builder directly:
@@ -45,16 +46,14 @@ useful when you are not sure whether a package was built.
 
 ## Before you publish an image
 
-Two per-unit things end up inside a built image, and both identify the unit that
-built it:
-
-* the eeprom blob in `files/`, once you have written your MAC into it (above), and
-* the base MAC compiled into the device tree, if you set one there instead of
-  leaving the `mac-address` placeholder.
+One per-unit thing ends up inside an image built this way, and it identifies the
+unit that built it: the eeprom blob in `files/`, once you have written your MAC
+into it (above). The flashed sysupgrade image does not have this problem: its
+device tree reads the base MAC from the U-Boot environment in flash, so nothing
+per-unit is baked in.
 
 An image built that way is fine for the unit it was made for, but it is not
-something to hand out: it carries that unit's address. The repository ships the
-placeholder (`mac-address = [02 00 00 00 00 00]`) and no eeprom blob for exactly
-this reason -- each owner runs
+something to hand out: it carries that unit's address. The repository ships no
+eeprom blob for exactly this reason -- each owner runs
 [`tools/mt7916_eeprom_mac.py`](../tools/mt7916_eeprom_mac.py) against their own
 board, so no two published images share an identity.

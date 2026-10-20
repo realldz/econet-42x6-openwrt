@@ -3,7 +3,11 @@
 Target: Econet vGP-42X6V1 GPON ONU, Airoha EN7523 SoC (2x Cortex-A53 running AArch32),
 SPI-NAND, MediaTek MT7916 Wi-Fi behind PCIe, OpenWrt on Linux 6.18.
 
-This document explains one bug: why the MT7916 could never be brought up, and what fixed it.
+This document explains two bugs: why the MT7916 could never be brought up
+(section 3: the root complex's own BAR 0 blocked its DMA), and why, after it
+worked, every boot still gave both radios a fresh random MAC address
+(section 10: the device tree missed the root port, so the endpoint never got an
+of_node and the radio MAC from flash was never looked up).
 It is written from the engineering log of the bring-up sessions, and every number, register
 name and log line below is taken from that log or from the patch that fixes the bug. Where the
 material is inconsistent or a conclusion is uncertain, that is stated explicitly.
@@ -573,3 +577,121 @@ Do not repeat this dead end. Two things made it expensive and both are avoidable
    space, so the PCI enumeration path is the level that can fix it; the platform bring-up
    driver never sees it. But the actual upstream defect is that the v2 bring-up path never
    programs `PCIE_BAR0_SETUP`, and that is where a permanent fix belongs.
+## 10. The second of_node blocker, found later (2026-10-20): the MAC never reached the radios
+
+With the BAR/`PCI_COMMAND` fix in, the radios came up but the `iw` addresses changed at every
+boot. The chain `pcie@1fa92000/wifi@0,0/{band@0,band@1}` was declared in the board DTS exactly
+so `mt76_eeprom_override()` (the mt76 *package* driver, `eeprom.c:174` in the
+`mt76-2026.09.01` build, not the in-kernel copy) would walk the endpoint's children for one
+whose `reg` matches `phy->band_idx`, and `of_get_mac_address()` on it would fall through to
+the nvmem cell `mac-address` -> the `mac-base` cell (base+6 for the 2.4 GHz band, base+7 for
+5 GHz). Instead the log still showed
+`mt7915e 0001:01:00.0: Invalid MAC address, using random address ...`.
+
+### What was actually missing
+
+`dmesg` and sysfs showed the other half of the story:
+
+* the nvmem side was perfect: `cat .../mtd11/mtd11/cells/ethaddr@19f,0` returned the six bytes
+  `24:0b:2a:fc:a6:f0`, so the `mac-base` post-process had applied and the provider core worked;
+* `/sys/bus/pci/devices/0001:01:00.0/of_node` **did not exist**. The endpoint PCI device had
+  firmware node == NULL, so the driver's `dev->dev->of_node` was NULL, the child loop never
+  ran, and the driver skipped straight to the random fallback.
+
+### Why the endpoint had no of_node
+
+`drivers/pci/of.c` gives a PCI device its node only through
+`pci_set_of_node(dev)` (*probe.c:2016*):
+
+```c
+if (!dev->bus->dev.of_node)      /* the endpoint's bus itself must have an of_node */
+        return 0;
+node = of_pci_find_child_device(dev->bus->dev.of_node, dev->devfn);
+```
+
+and a bus inherits its node from the bridge in front of it (`pci_set_bus_of_node()`), with the
+FIRST bus taking `pcibios_get_phb_of_node()` (the `pcie@1fa92000` node itself). The topology
+on this board, measured on the real hardware and in sysfs:
+
+```
+platform/1fa92000.pcie/pci0001:00/0001:00:01.0/0001:01:00.0
+                          ^ root port  ^ the MT7916 endpoint
+```
+
+There is one level the DTS did not declare: the root port `0001:00:01.0` (dev 1, fn 0 of
+bus 0001:00). With no node for it:
+
+* `pci_set_of_node(bridge 0001:00:01.0)` looked for a child of `pcie@1fa92000` whose
+  `reg`'s devfn byte is `0x08`; the only child was `wifi@0,0` (`reg = <0x0000...>`, devfn 0),
+  so the bridge got no of_node...
+* ...so `pci_set_bus_of_node()` left bus `0001:01` without one either,
+* ...so the endpoint's `pci_set_of_node()` returned immediately and it booted fwnode-less.
+  The match itself only compares the device/function byte (`of_pci_get_devfn()` returns
+  `(reg[0] >> 8) & 0xff`), so the flat layout was *almost* right -- it missed exactly the one
+  intermediate hop this root complex inserts.
+
+### The fix, and the chain that then closes
+
+One wrapper node in `en7523-vgp42x6v1.dts`:
+
+```dts
+pci@1,0 {
+        reg = <0x00000800 0 0 0 0>;       /* devfn 0x08: bus 0001:00, dev 1, fn 0 */
+        device_type = "pci";
+        #address-cells = <3>;
+        #size-cells = <2>;
+
+        wifi@0,0 {
+                reg = <0x00010000 0 0 0 0>;   /* bus 0001:01, dev 0, fn 0 */
+                #address-cells = <1>;
+                #size-cells = <0>;
+                band@0 { reg = <0>;  nvmem-cells = <&ethaddr 6>; nvmem-cell-names = "mac-address"; };
+                band@1 { reg = <1>;  nvmem-cells = <&ethaddr 7>; nvmem-cell-names = "mac-address"; };
+        };
+};
+```
+
+Chain after the change, each step checked against the 6.18.54 source and then on the board:
+
+1. `pci_set_of_node(root port 1)` -> `of_pci_find_child_device(pcie@1fa92000, 0x08)` -> the
+   new `pci@1,0` (0x800>>8 = 8). The bridge now has an of_node.
+2. `pci_set_bus_of_node(bus 0001:01)` -> the bridge's node. The bus has an of_node.
+3. `pci_set_of_node(endpoint)` -> `of_pci_find_child_device(pci@1,0, 0)` -> `wifi@0,0`
+   (`0x10000>>8` = 0). The endpoint has an of_node: `/sys/bus/pci/devices/0001:01:00.0/of_node`
+   lists `band@0`, `band@1`.
+4. `mt76_eeprom_override()` walks the children, `of_get_mac_address(band_np)` finds no literal
+   `mac-address` property and falls to `of_get_mac_address_nvmem()` -> the nvmem cell the DTS
+   pins. The `mac-base` post-process adds the band index.
+5. Measured on the flashed image (sha256 `169e59f9...`): `iw dev` shows `phy0-ap0` =
+   `24:0b:2a:fc:a6:f6` and `phy1-ap0` = `24:0b:2a:fc:a6:f7`; `dmesg` contains zero
+   `random address` lines; the wired side keeps base+0..+4.
+
+The `ethaddr` index shift (+6/+7) is the board's legacy numbering, not new: see
+[wifi.md](wifi.md). `tools/check_dts_mac.py` checks the whole chain statically (it must find a
+`wifi@N` node under the PCIe node, both `band@M` children with the right `reg` and cells), and
+`dts_vs_image.py` compares the DTS against the FIT's own dtb so the wrapper cannot silently
+drop out of the built image.
+
+Two walked-back dead ends, recorded for the next person:
+
+* **"mt76 is in the kernel tree, so patch the kernel driver"** -- it is *also* in the tree (the
+  whole `drivers/net/wireless/mediatek/mt76/` source tree from 6.18), but the module that runs
+  is built from the **`kmod-mt7915e` package** (`build_dir/.../mt76-2026.09.01~be5ce791/`).
+  The package code already walks the band children; patching the in-tree copy changed nothing.
+* **"The devlink `Failed to create device link (0x180)` lines name the problem"** -- they are
+  fw_devlink diagnostics, harmless here either way; the decisive probe was the *absence* of
+  `/sys/bus/pci/devices/.../of_node`, not anything those lines print.
+
+## 11. Lessons, continued
+
+10. **A DT node for a PCI device is only reachable through the *bridge* it hangs under.** If
+   the driver looks up `dev->dev->of_node`, every level from the host bridge down must exist in
+   the device tree, one node per PCI hop, each with a `reg` whose devfn byte matches. A
+   "children of the endpoint" design silently degrades to RANDOM MACs elsewhere --
+   `is_valid_ether_addr()` failure logs look like an eeprom problem, not a device-tree one.
+11. **`/sys/bus/pci/devices/<dev>/of_node` is the one-second check** for any DT-attached
+   endpoint: if the directory is absent, nothing below the of_node design works, and the
+   search should go straight to `pci_set_of_node()` and `of_pci_find_child_device()`.
+12. **Patch the code that runs, not the code that exists.** Both an in-kernel `mt76/` tree and
+   the `kmod-mt7915e` package were present; only the package builds the module the board
+   loads. Confirm the build directory of the artifact before writing a patch.

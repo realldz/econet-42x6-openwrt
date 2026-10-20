@@ -116,7 +116,7 @@ Three nodes were added to
 | Node | Address | Notes |
 |---|---|---|
 | `eth` | `0x1fb50000` | `airoha,en7523-eth`; windows `fe` `0x1fb50000`+`0x2600`, `qdma0` `0x1fb54000`+`0x2000`, `qdma1` `0x1fb56000`+`0x2000`, `gdmp` `0x1fbf9000`+`0x1000`; seven resets (`fe`, `pdma`, `qdma`, `hsi0-mac`, `hsi1-mac`, `hsi-mac`, `gdmp`); ten GIC interrupts; two `memory-region`s for the QDMA rings |
-| `gdm1` | `reg = <1>` | `airoha,eth-mac`, `phy-mode = "internal"` -- the MAC port facing the internal switch -- plus a `fixed-link` at 10000 and a `mac-address` |
+| `gdm1` | `reg = <1>` | `airoha,eth-mac`, `phy-mode = "internal"` -- the MAC port facing the internal switch -- plus a `fixed-link` at 10000 and an `nvmem-cells` MAC reference |
 | `switch` | `0x1fb58000` + `0x8000` | `airoha,en7523-switch`, one `GSW` reset, an interrupt controller on `GIC_SPI 31`, ports 1-4 as `lan1`..`lan4`, and port 6 as the CPU port pointed at `gdm1` by `ethernet = <&gdm1>` |
 
 What matters for interface names and debugging:
@@ -132,13 +132,22 @@ What matters for interface names and debugging:
   `fixed-link` at 10 Gbps, which is why the conduit's link state reads `10Gbps/Full`.
 * **The four switch PHYs are at MDIO addresses 9, 10, 11 and 12** (nodes
   `ethernet-phy@9`..`@c`, lines 204-222), one per front-panel port.
-* **`mac-address` on `gdm1` is not cosmetic.** The driver calls
-  `of_get_ethdev_address()`; with no such property and no nvmem cell it falls back to
-  `eth_hw_addr_random()` and the board gets a new address every boot (the vendor
-  U-Boot `ethaddr` is not passed to Linux). With it, `eth0` and all four user ports
-  share the intended address and `addr_assign_type` is 0. The value is redacted here
-  (see [docs/README.md](README.md)); the upstreamable form is an nvmem cell reading
-  the U-Boot environment partition.
+* **The MAC comes from flash, not from a property.** The driver calls
+  `of_get_ethdev_address()`; with no `mac-address` property and no nvmem cell it
+  falls back to `eth_hw_addr_random()` and the board gets a new address every boot
+  (the vendor U-Boot `ethaddr` is not passed to Linux). The U-Boot environment
+  partition (`u-boot-env`, 0x7C000) is therefore declared with
+  `compatible = "nvmem-cells", "fixed-layout"`, which makes the nvmem device
+  mtdcore attaches to the MTD partition parse its `ethaddr@19f` child as a
+  `mac-base` cell -- ASCII, 17 bytes (see ethernet.md section 2 for the measured
+  offsets). `gdm1`, the four switch ports and both radio bands each consume the
+  cell with their own index, so `eth0` and the ports come up with the address
+  U-Boot stored, `addr_assign_type` is 0, and no per-unit value is stored
+  anywhere in the tree (`tools/check_dts_mac.py --dump` re-checks the layout
+  against a real flash dump offline). Do NOT also declare `u-boot,env` on the
+  partition: that platform driver would register a second nvmem for the same
+  of_node, and `of_nvmem_cell_get()` returns the first-registered one --
+  mtdcore's own, which has no cells -- so every lookup fails silently.
 
 One caveat, seen from the bootloader prompt rather than Linux: the two QDMA windows
 read back the same value (`0x106`), so the second window is not a separate register
@@ -320,11 +329,14 @@ wipes it and the interface has to be created again.
 
 ### 6.5 A stable hardware address
 
-With `mac-address` on `gdm1`, `eth0` reports `addr_assign_type = 0` (not random),
-`lan1`..`lan4` and `br-lan` all carry that same address, and the IPv6 link-local
-address derived from it is EUI-64-correct. The `generated random MAC address` warning
-the driver prints when the property is absent does not appear. This also survived a
-wipe-and-reinstall, so it is the image, not left-over state.
+`eth0` reports `addr_assign_type = 0` (not random): the address came from the
+`ethaddr` cell in the U-Boot-environment partition, `lan1`..`lan4` carry base+1..+4
+and `br-lan` carries `lan1`'s, and the IPv6 link-local address derived from it is
+EUI-64-correct. The `generated random MAC address` warning the driver prints
+when no source exists does not appear. This also survived a wipe-and-reinstall,
+so it is the image, not left-over state. (The first version of this section
+described a per-unit `mac-address` property on `gdm1`; that property is gone --
+see "The MAC comes from flash" above.)
 
 ## 7. What is not done
 
